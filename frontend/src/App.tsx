@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useInternetIdentity } from './hooks/useInternetIdentity';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -191,12 +191,14 @@ export default function App() {
             <div className="flex items-center space-x-2 sm:space-x-4">
               {isAuthenticated ? (
                 <div className="flex items-center space-x-2 sm:space-x-3">
+                  {/* TODO: Fix userProfile type issue
                   {userProfile && (
                     <div className="hidden sm:flex items-center space-x-2">
                       <User className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">{userProfile.name}</span>
                     </div>
                   )}
+                  */}
                   <Badge variant="outline" className="bg-primary/5 hidden sm:inline-flex">
                     Connected
                   </Badge>

@@ -10,10 +10,16 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Calendar, Plus, Settings, Clock, AlertCircle, Play, Square, X, BarChart3, Users, FileText, Coins, Copy, Filter, Code, Info } from 'lucide-react';
+import { Plus, Settings, AlertCircle, Play, Square, X, Users, FileText, Coins, Copy, Filter, Code, Info } from 'lucide-react';
 import { useListSeasons, useCreateSeason, useActivateSeason, useEndSeason, useCancelSeason, useGetSeasonRegistrationCount, getSeasonNumber, useListNameRecords, useGetCanisterPrincipal, useGetCandidFile } from '../hooks/useQueries';
-import { Season, SeasonStatus, NameRecord, AddressType } from '../backend';
+import { Season, SeasonStatus, NameRecord } from '../backend';
 import { toast } from 'sonner';
+
+// Helper functions for variant type checking
+const isSeasonDraft = (status: SeasonStatus) => 'draft' in status;
+const isSeasonActive = (status: SeasonStatus) => 'active' in status;
+const isSeasonEnded = (status: SeasonStatus) => 'ended' in status;
+const isSeasonCancelled = (status: SeasonStatus) => 'cancelled' in status;
 
 export function AdminPanel() {
   const { data: seasons = [], isLoading: seasonsLoading } = useListSeasons();
@@ -29,7 +35,7 @@ export function AdminPanel() {
     );
   }
 
-  const activeSeason = seasons.find(season => season.status === 'active');
+  const activeSeason = seasons.find(season => isSeasonActive(season.status));
 
   return (
     <div className="space-y-6">
@@ -95,7 +101,7 @@ function DashboardTab({ nameRecords, seasons }: { nameRecords: NameRecord[]; sea
   // Document type breakdown (placeholder data)
   const metadataCount = totalNames; // Each name has metadata
   const markdownCount = Math.floor(totalNames * 0.7); // Assume 70% have markdown
-  const didCount = nameRecords.filter(record => record.addressType === 'canister').length;
+  const didCount = nameRecords.filter(record => 'canister' in record.addressType).length;
 
   // ICP balance placeholder - this would come from backend
   const icpBalance = "0.00"; // Placeholder
@@ -195,11 +201,11 @@ function DashboardTab({ nameRecords, seasons }: { nameRecords: NameRecord[]; sea
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm">Active Seasons</span>
-              <Badge variant="outline">{seasons.filter(s => s.status === 'active').length}</Badge>
+              <Badge variant="outline">{seasons.filter(s => isSeasonActive(s.status)).length}</Badge>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm">Draft Seasons</span>
-              <Badge variant="outline">{seasons.filter(s => s.status === 'draft').length}</Badge>
+              <Badge variant="outline">{seasons.filter(s => isSeasonDraft(s.status)).length}</Badge>
             </div>
           </CardContent>
         </Card>
@@ -400,14 +406,14 @@ function NamesTab({ nameRecords, seasons, isLoading }: { nameRecords: NameRecord
                     <TableCell className="font-medium">
                       <div className="flex items-center space-x-2">
                         <span>{record.name}</span>
-                        {record.addressType === 'canister' && (
+                        {'canister' in record.addressType && (
                           <Badge variant="secondary" className="text-xs">Canister</Badge>
                         )}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={record.addressType === 'canister' ? 'default' : 'outline'}>
-                        {record.addressType === 'canister' ? 'Canister' : 'Identity'}
+                      <Badge variant={'canister' in record.addressType ? 'default' : 'outline'}>
+                        {'canister' in record.addressType ? 'Canister' : 'Identity'}
                       </Badge>
                     </TableCell>
                     <TableCell className="font-mono text-xs">
@@ -462,7 +468,7 @@ function SeasonsTab({
         </div>
         
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogTrigger asChild>
+          <DialogTrigger>
             <Button>
               <Plus className="h-4 w-4 mr-2" />
               Create Season
@@ -642,24 +648,23 @@ function SeasonRow({ season, hasActiveSeason }: { season: Season; hasActiveSeaso
   const now = new Date();
 
   const getStatusBadge = (status: SeasonStatus) => {
-    switch (status) {
-      case 'draft':
-        return <Badge variant="outline">Draft</Badge>;
-      case 'active':
-        return <Badge variant="default">Active</Badge>;
-      case 'ended':
-        return <Badge variant="secondary">Ended</Badge>;
-      case 'cancelled':
-        return <Badge variant="destructive">Cancelled</Badge>;
-      default:
-        return <Badge variant="outline">Unknown</Badge>;
+    if (isSeasonDraft(status)) {
+      return <Badge variant="outline">Draft</Badge>;
+    } else if (isSeasonActive(status)) {
+      return <Badge variant="default">Active</Badge>;
+    } else if (isSeasonEnded(status)) {
+      return <Badge variant="secondary">Ended</Badge>;
+    } else if (isSeasonCancelled(status)) {
+      return <Badge variant="destructive">Cancelled</Badge>;
+    } else {
+      return <Badge variant="outline">Unknown</Badge>;
     }
   };
 
   const isWithinTimeWindow = now >= startDate && now <= endDate;
-  const canActivate = season.status === 'draft' && !hasActiveSeason;
-  const canEnd = season.status === 'active';
-  const canCancel = season.status === 'active';
+  const canActivate = isSeasonDraft(season.status) && !hasActiveSeason;
+  const canEnd = isSeasonActive(season.status);
+  const canCancel = isSeasonActive(season.status);
 
   return (
     <TableRow>
@@ -672,7 +677,7 @@ function SeasonRow({ season, hasActiveSeason }: { season: Season; hasActiveSeaso
       <TableCell>
         <div className="flex items-center space-x-2">
           {getStatusBadge(season.status)}
-          {season.status === 'active' && !isWithinTimeWindow && (
+          {isSeasonActive(season.status) && !isWithinTimeWindow && (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger>
@@ -684,7 +689,7 @@ function SeasonRow({ season, hasActiveSeason }: { season: Season; hasActiveSeaso
               </Tooltip>
             </TooltipProvider>
           )}
-          {season.status === 'draft' && hasActiveSeason && (
+          {isSeasonDraft(season.status) && hasActiveSeason && (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger>
@@ -727,7 +732,7 @@ function SeasonRow({ season, hasActiveSeason }: { season: Season; hasActiveSeaso
           {canActivate && (
             <TooltipProvider>
               <Tooltip>
-                <TooltipTrigger asChild>
+                <TooltipTrigger>
                   <Button
                     variant="default"
                     size="sm"
@@ -744,10 +749,10 @@ function SeasonRow({ season, hasActiveSeason }: { season: Season; hasActiveSeaso
               </Tooltip>
             </TooltipProvider>
           )}
-          {season.status === 'draft' && hasActiveSeason && (
+          {isSeasonDraft(season.status) && hasActiveSeason && (
             <TooltipProvider>
               <Tooltip>
-                <TooltipTrigger asChild>
+                <TooltipTrigger>
                   <Button
                     variant="default"
                     size="sm"
@@ -766,7 +771,7 @@ function SeasonRow({ season, hasActiveSeason }: { season: Season; hasActiveSeaso
           {canEnd && (
             <TooltipProvider>
               <Tooltip>
-                <TooltipTrigger asChild>
+                <TooltipTrigger>
                   <Button
                     variant="outline"
                     size="sm"
@@ -786,7 +791,7 @@ function SeasonRow({ season, hasActiveSeason }: { season: Season; hasActiveSeaso
           {canCancel && (
             <TooltipProvider>
               <Tooltip>
-                <TooltipTrigger asChild>
+                <TooltipTrigger>
                   <Button
                     variant="destructive"
                     size="sm"

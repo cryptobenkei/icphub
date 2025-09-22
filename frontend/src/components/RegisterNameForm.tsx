@@ -14,13 +14,13 @@ import { AddressType } from '../backend';
 interface FormData {
   name: string;
   address: string;
-  addressType: AddressType;
+  addressType: string;
 }
 
 export function RegisterNameForm() {
   const { register, handleSubmit, watch, formState: { errors } } = useForm<FormData>({
     defaultValues: {
-      addressType: AddressType.identity,
+      addressType: 'identity',
     },
   });
   
@@ -30,18 +30,20 @@ export function RegisterNameForm() {
   const { data: userNames } = useGetUserNames();
   const addressType = watch('addressType');
 
-  // Check if user already has a name in the current season
-  const hasNameInCurrentSeason = activeSeason && userNames.some(
-    name => name.seasonId === activeSeason.id
-  );
+  // Check if user already has any registered name (one name per principal globally)
+  const hasRegisteredName = userNames && userNames.length > 0;
 
   const onSubmit = (data: FormData) => {
     if (!activeSeason || !activeSeasonInfo) return;
-    
+
+    // Convert string addressType to AddressType variant
+    const addressType = data.addressType === 'canister' ? AddressType.canister : AddressType.identity;
+
     registerNameMutation.mutate({
-      ...data,
+      name: data.name,
+      address: data.address,
+      addressType,
       seasonId: activeSeason.id,
-      price: activeSeasonInfo.price,
     });
   };
 
@@ -81,15 +83,15 @@ export function RegisterNameForm() {
     );
   }
 
-  if (hasNameInCurrentSeason) {
+  if (hasRegisteredName) {
     return (
       <Card>
         <CardContent className="text-center py-8">
           <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Already Registered</h3>
+          <h3 className="text-lg font-semibold mb-2">Name Already Registered</h3>
           <p className="text-muted-foreground">
-            You have already registered a name in the current season "{activeSeason.name}". 
-            Each identity can only register one name per season.
+            You have already registered a name: <strong>{userNames[0]?.name}</strong>.
+            Each principal can only register one name globally.
           </p>
         </CardContent>
       </Card>
@@ -125,7 +127,7 @@ export function RegisterNameForm() {
               <Label className="text-muted-foreground">Registration Price</Label>
               <div className="font-medium flex items-center space-x-1">
                 <Coins className="h-3 w-3" />
-                <span>{activeSeasonInfo.price.toString()} ICP</span>
+                <span>{(Number(activeSeasonInfo.price) / 100_000_000).toFixed(2)} ICP</span>
               </div>
             </div>
             <div>
@@ -144,8 +146,8 @@ export function RegisterNameForm() {
       <Alert>
         <Coins className="h-4 w-4" />
         <AlertDescription>
-          <strong>Payment Required:</strong> Registration requires a payment of {activeSeasonInfo.price.toString()} ICP tokens. 
-          The payment will be processed automatically when you submit the registration.
+          <strong>Payment Required:</strong> Registration requires a payment of {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(2)} ICP tokens.
+          The payment will be processed automatically when you submit the registration. This includes a 1-year subscription.
         </AlertDescription>
       </Alert>
 
@@ -197,14 +199,14 @@ export function RegisterNameForm() {
                 className="flex space-x-6"
               >
                 <div className="flex items-center space-x-2">
-                  <RadioGroupItem value={AddressType.identity} id="identity" />
+                  <RadioGroupItem value="identity" id="identity" />
                   <Label htmlFor="identity" className="flex items-center space-x-2 cursor-pointer">
                     <User className="h-4 w-4" />
                     <span>Identity</span>
                   </Label>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <RadioGroupItem value={AddressType.canister} id="canister" />
+                  <RadioGroupItem value="canister" id="canister" />
                   <Label htmlFor="canister" className="flex items-center space-x-2 cursor-pointer">
                     <Globe className="h-4 w-4" />
                     <span>Canister</span>
@@ -215,12 +217,12 @@ export function RegisterNameForm() {
 
             <div className="space-y-2">
               <Label htmlFor="address">
-                {addressType === AddressType.canister ? 'Canister ID' : 'Principal ID'}
+                {addressType === 'canister' ? 'Canister ID' : 'Principal ID'}
               </Label>
               <Input
                 id="address"
                 placeholder={
-                  addressType === AddressType.canister
+                  addressType === 'canister'
                     ? 'rdmx6-jaaaa-aaaah-qcaiq-cai'
                     : 'principal-id-here'
                 }
@@ -236,7 +238,7 @@ export function RegisterNameForm() {
                 <p className="text-sm text-destructive">{errors.address.message}</p>
               )}
               <p className="text-xs text-muted-foreground">
-                {addressType === AddressType.canister
+                {addressType === 'canister'
                   ? 'Enter the canister ID this name should point to'
                   : 'Enter the principal ID this name should point to'}
               </p>
@@ -245,8 +247,9 @@ export function RegisterNameForm() {
             <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                You can only register one name per season. Make sure your choice is final before submitting.
-                Payment of {activeSeasonInfo.price.toString()} ICP will be processed automatically.
+                <strong>Important:</strong> You can only register ONE name per principal (globally, not per season).
+                Make sure your choice is final before submitting.
+                Payment of {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(2)} ICP will be processed automatically and includes a 1-year subscription.
               </AlertDescription>
             </Alert>
 
@@ -263,7 +266,7 @@ export function RegisterNameForm() {
               ) : (
                 <>
                   <Coins className="mr-2 h-4 w-4" />
-                  Pay {activeSeasonInfo.price.toString()} ICP & Register Name
+                  Pay {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(2)} ICP & Register Name
                 </>
               )}
             </Button>

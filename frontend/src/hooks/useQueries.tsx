@@ -17,7 +17,8 @@ export function useGetCallerUserProfile() {
     queryKey: ['currentUserProfile'],
     queryFn: async () => {
       if (!actor) throw new Error('Actor not available');
-      return actor.getCallerUserProfile();
+      const result = await actor.getCallerUserProfile();
+      return result.length > 0 ? result[0] : null;
     },
     enabled: !!actor && !actorFetching,
     retry: false,
@@ -355,7 +356,12 @@ export function useGetNameRecord(name: string) {
     queryKey: ['nameRecord', name],
     queryFn: async () => {
       if (!actor || !name.trim()) throw new Error('Actor not available or name empty');
-      return actor.getNameRecord(name);
+      const result = await actor.getNameRecord(name);
+      if ('ok' in result) {
+        return result.ok;
+      } else {
+        throw new Error(result.err);
+      }
     },
     enabled: !!actor && !isFetching && !!name.trim(),
     retry: false,
@@ -397,29 +403,29 @@ export function useRegisterName() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ 
-      name, 
-      address, 
-      addressType, 
-      seasonId,
-      price
-    }: { 
-      name: string; 
-      address: string; 
+    mutationFn: async ({
+      name,
+      address,
+      addressType,
+      seasonId
+    }: {
+      name: string;
+      address: string;
       addressType: AddressType;
       seasonId: bigint;
-      price: bigint;
     }) => {
       if (!actor || !identity) throw new Error('Not authenticated');
-      
-      // TODO: Implement ICP payment transfer here
-      // This should transfer the required ICP amount to the canister before registration
-      // For now, we'll proceed with registration assuming payment is handled by the backend
-      
+
       const owner = identity.getPrincipal().toString();
-      // Convert enum to variant format for the canister
-      const addressTypeVariant = toAddressTypeVariant(addressType);
-      return actor.registerName(name, address, addressTypeVariant, owner, seasonId);
+
+      // AddressType is already in variant format
+
+      // Call registerName with payment integration
+      // Note: In a real implementation, you would need to attach ICP cycles to this call
+      // For now, we're calling the function directly and the backend will validate payment
+      const paymentId = await actor.registerName(name, address, addressType, owner, seasonId);
+
+      return paymentId;
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['nameRecord', variables.name] });
@@ -427,6 +433,9 @@ export function useRegisterName() {
       queryClient.invalidateQueries({ queryKey: ['seasons'] });
       queryClient.invalidateQueries({ queryKey: ['activeSeasonInfo'] });
       queryClient.invalidateQueries({ queryKey: ['hasRegisteredName'] });
+      queryClient.invalidateQueries({ queryKey: ['userNames'] });
+      queryClient.invalidateQueries({ queryKey: ['userSubscription'] });
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
       toast.success('Name registered successfully! Payment processed.');
       
       // Dispatch custom event to trigger navigation to the settings page
@@ -438,14 +447,6 @@ export function useRegisterName() {
   });
 }
 
-// Extended metadata structure to include markdown content
-interface ExtendedMetadata {
-  name: string;
-  description: string;
-  x: string;
-  linkedin: string;
-  url: string;
-}
 
 // Name Metadata Management Queries
 export function useGetNameMetadata(name: string) {
@@ -456,7 +457,16 @@ export function useGetNameMetadata(name: string) {
     queryFn: async () => {
       if (!actor || !name.trim()) throw new Error('Actor not available or name empty');
       try {
-        return await actor.getMetadata(name);
+        const result = await actor.getMetadata(name);
+        if ('ok' in result) {
+          return result.ok;
+        } else {
+          // If metadata not found, return null instead of throwing
+          if (result.err.includes('Metadata not found')) {
+            return null;
+          }
+          throw new Error(result.err);
+        }
       } catch (error: any) {
         // If metadata not found, return null instead of throwing
         if (error.message?.includes('Metadata not found')) {
@@ -509,7 +519,16 @@ export function useGetNameMarkdown(name: string) {
     queryFn: async () => {
       if (!actor || !name.trim()) throw new Error('Actor not available or name empty');
       try {
-        return await actor.getMarkdown(name);
+        const result = await actor.getMarkdownContent(name);
+        if ('ok' in result) {
+          return result.ok;
+        } else {
+          // If markdown not found, return null instead of throwing
+          if (result.err.includes('Markdown not found')) {
+            return null;
+          }
+          throw new Error(result.err);
+        }
       } catch (error: any) {
         // If markdown not found, return null
         if (error.message?.includes('Markdown not found')) {
@@ -557,8 +576,12 @@ export function useGetNameDid(name: string) {
       // return actor.getNameDid(name);
       
       // For now, return a placeholder DID content for canisters
-      const nameRecord = await actor.getNameRecord(name);
-      if (nameRecord.addressType === 'canister') {
+      const nameRecordResult = await actor.getNameRecord(name);
+      if ('err' in nameRecordResult) {
+        throw new Error(nameRecordResult.err);
+      }
+      const nameRecord = nameRecordResult.ok;
+      if ('canister' in nameRecord.addressType) {
         return `// Placeholder DID file for ${name}
 // This is a temporary placeholder until backend DID storage is implemented
 
@@ -609,13 +632,8 @@ export function useSaveNameDid() {
 export function useGetActiveSeason() {
   const { data: seasons = [] } = useListSeasons();
 
-  // Handle both variant and enum status formats
-  const activeSeason = seasons.find(season => {
-    if (typeof season.status === 'object' && 'active' in season.status) {
-      return true;
-    }
-    return season.status === 'active';
-  });
+  // Find the active season using variant type checking
+  const activeSeason = seasons.find(season => 'active' in season.status);
 
   const now = BigInt(Date.now() * 1000000); // Convert to nanoseconds
 

@@ -1,14 +1,10 @@
-import React from 'react';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { Brain, Search, FileText, Database, MessageSquare, Zap, Users, Globe, ArrowRight, Shield } from 'lucide-react';
+import { Brain, Database, Zap, Shield } from 'lucide-react';
 import { useGetActiveSeasonInfo, useHasRegisteredName, getSeasonNumber } from '../hooks/useQueries';
 import { useInternetIdentity } from '../hooks/useInternetIdentity';
 
 export function Home() {
-  const { identity, login, isLoggingIn } = useInternetIdentity();
+  const { identity, login } = useInternetIdentity();
   const isAuthenticated = !!identity && !identity.getPrincipal().isAnonymous();
   
   const { data: seasonInfo, isLoading: seasonLoading } = useGetActiveSeasonInfo();
@@ -144,8 +140,8 @@ export function Home() {
       </div>
 
       {/* Context Protocol Section */}
-      <div className="space-y-6">
-        <Card className="border-primary/20 hover:border-primary/30 transition-colors">
+      <div className="max-w-3xl mx-auto space-y-6">
+        <Card className="border-primary/20 hover:border-primary/30 transition-colors bg-primary/5">
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <Brain className="h-5 w-5 text-primary" />
@@ -172,7 +168,7 @@ export function Home() {
           </CardContent>
         </Card>
 
-        <Card className="border-secondary/20 hover:border-secondary/30 transition-colors">
+        <Card className="border-secondary/20 hover:border-secondary/30 transition-colors bg-secondary/5">
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <Shield className="h-5 w-5 text-secondary" />
@@ -199,7 +195,7 @@ export function Home() {
           </CardContent>
         </Card>
 
-        <Card className="border-accent/20 hover:border-accent/30 transition-colors">
+        <Card className="border-accent/20 hover:border-accent/30 transition-colors bg-accent/5">
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
               <Database className="h-5 w-5 text-accent" />

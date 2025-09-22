@@ -54,8 +54,8 @@ export function MyNames() {
             Manage your registered name: <span className="font-mono">{primaryName.name}</span>
           </p>
         </div>
-        <Badge variant={primaryName.addressType === AddressType.canister ? 'default' : 'secondary'}>
-          {primaryName.addressType}
+        <Badge variant={'canister' in primaryName.addressType ? 'default' : 'secondary'}>
+          {'canister' in primaryName.addressType ? 'Canister' : 'Identity'}
         </Badge>
       </div>
 

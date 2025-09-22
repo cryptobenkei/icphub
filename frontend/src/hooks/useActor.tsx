@@ -4,9 +4,7 @@ import { useEffect } from 'react';
 import { type backendInterface } from '../backend';
 import { createActorWithConfig } from '../config';
 
-interface ExtendedBackendInterface extends backendInterface {
-    initializeAccessControl: () => Promise<void>;
-}
+// initializeAccessControl is already part of the backend interface
 
 const ACTOR_QUERY_KEY = 'actor';
 export function useActor() {
@@ -32,9 +30,9 @@ export function useActor() {
             // Check if initializeAccessControl exists and call it (some backends may not have this method)
             if (
                 'initializeAccessControl' in actor &&
-                typeof (actor as ExtendedBackendInterface).initializeAccessControl === 'function'
+                typeof actor.initializeAccessControl === 'function'
             ) {
-                await (actor as ExtendedBackendInterface).initializeAccessControl();
+                await actor.initializeAccessControl();
             }
             return actor;
         },
