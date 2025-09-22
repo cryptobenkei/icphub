@@ -670,8 +670,8 @@ What would you like to explore?`;
                 onClick={handleRegisterForAdmin}
                 disabled={isRegisteringForAdmin}
                 variant="outline"
-                size="xs"
-                className="text-xs text-gray-400 border-white/30 hover:bg-white/10 hover:text-gray-300 px-3 py-1"
+                size="sm"
+                className="text-xs text-gray-400 border-white/30 hover:bg-white/10 hover:text-gray-300 px-2 py-1"
               >
                 <UserPlus className="h-3 w-3 mr-1" />
                 {isRegisteringForAdmin ? 'Registering...' : 'Register for Admin'}
