@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Globe, User, Calendar, AlertCircle, CheckCircle, Coins } from 'lucide-react';
 import { useRegisterName, useGetActiveSeason, useGetUserNames, useGetActiveSeasonInfo } from '../hooks/useQueries';
+import { useInternetIdentity } from '../hooks/useInternetIdentity';
 import { AddressType } from '../backend';
 
 interface FormData {
@@ -18,12 +19,16 @@ interface FormData {
 }
 
 export function RegisterNameForm() {
-  const { register, handleSubmit, watch, formState: { errors } } = useForm<FormData>({
+  const { identity } = useInternetIdentity();
+  const principalId = identity?.getPrincipal().toString() || '';
+
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     defaultValues: {
       addressType: 'identity',
+      address: principalId,
     },
   });
-  
+
   const registerNameMutation = useRegisterName();
   const { activeSeason } = useGetActiveSeason();
   const { data: activeSeasonInfo } = useGetActiveSeasonInfo();
@@ -32,6 +37,13 @@ export function RegisterNameForm() {
 
   // Check if user already has any registered name (one name per principal globally)
   const hasRegisteredName = userNames && userNames.length > 0;
+
+  // Update address field when principal ID changes and address type is identity
+  useEffect(() => {
+    if (addressType === 'identity' && principalId) {
+      setValue('address', principalId);
+    }
+  }, [principalId, addressType, setValue]);
 
   const onSubmit = (data: FormData) => {
     if (!activeSeason || !activeSeasonInfo) return;
@@ -101,55 +113,44 @@ export function RegisterNameForm() {
   return (
     <div className="space-y-6">
       {/* Season Info */}
-      <Card>
+      <Card className="mt-8 bg-primary text-white border-primary">
         <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
+          <CardTitle className="flex items-center space-x-2 text-white">
             <Calendar className="h-5 w-5" />
             <span>Current Season: {activeSeason.name}</span>
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-white/80">
             Registration is open until {endDate.toLocaleString()}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <Label className="text-muted-foreground">Name Length</Label>
-              <div className="font-medium">
+              <Label className="text-white/80">Name Length</Label>
+              <div className="font-medium text-white">
                 {activeSeason.minNameLength.toString()} - {activeSeason.maxNameLength.toString()} characters
               </div>
             </div>
             <div>
-              <Label className="text-muted-foreground">Available Names</Label>
-              <div className="font-medium">{activeSeasonInfo.availableNames.toString()}</div>
+              <Label className="text-white/80">Available Names</Label>
+              <div className="font-medium text-white">
+                {activeSeasonInfo.availableNames.toString()} available / {Number(activeSeason.maxNames) - Number(activeSeasonInfo.availableNames)} used
+              </div>
             </div>
             <div>
-              <Label className="text-muted-foreground">Registration Price</Label>
-              <div className="font-medium flex items-center space-x-1">
+              <Label className="text-white/80">Registration Price</Label>
+              <div className="font-medium flex items-center space-x-1 text-white">
                 <Coins className="h-3 w-3" />
                 <span>{(Number(activeSeasonInfo.price) / 100_000_000).toFixed(2)} ICP</span>
               </div>
             </div>
             <div>
-              <Label className="text-muted-foreground">Status</Label>
-              <Badge variant="default">Active</Badge>
-            </div>
-            <div>
-              <Label className="text-muted-foreground">Ends</Label>
-              <div className="font-medium">{endDate.toLocaleDateString()}</div>
+              <Label className="text-white/80">Status</Label>
+              <div className="font-medium text-white">Active</div>
             </div>
           </div>
         </CardContent>
       </Card>
-
-      {/* Payment Notice */}
-      <Alert>
-        <Coins className="h-4 w-4" />
-        <AlertDescription>
-          <strong>Payment Required:</strong> Registration requires a payment of {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(2)} ICP tokens.
-          The payment will be processed automatically when you submit the registration. This includes a 1-year subscription.
-        </AlertDescription>
-      </Alert>
 
       {/* Registration Form */}
       <Card>
@@ -195,7 +196,15 @@ export function RegisterNameForm() {
               <Label>Address Type</Label>
               <RadioGroup
                 value={addressType}
-                onValueChange={(value) => register('addressType').onChange({ target: { value } })}
+                onValueChange={(value) => {
+                  setValue('addressType', value);
+                  // Set address field to principal ID when switching to identity type
+                  if (value === 'identity') {
+                    setValue('address', principalId);
+                  } else {
+                    setValue('address', '');
+                  }
+                }}
                 className="flex space-x-6"
               >
                 <div className="flex items-center space-x-2">

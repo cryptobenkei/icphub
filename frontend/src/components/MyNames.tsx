@@ -47,18 +47,6 @@ export function MyNames() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold">My Name</h3>
-          <p className="text-sm text-muted-foreground">
-            Manage your registered name: <span className="font-mono">{primaryName.name}</span>
-          </p>
-        </div>
-        <Badge variant={'canister' in primaryName.addressType ? 'default' : 'secondary'}>
-          {'canister' in primaryName.addressType ? 'Canister' : 'Identity'}
-        </Badge>
-      </div>
-
       <NameManagement record={primaryName} />
     </div>
   );
@@ -585,19 +573,19 @@ What would you like to explore?`;
   return (
     <div className="space-y-6">
       {/* Basic Name Information */}
-      <Card>
+      <Card className="mt-8 bg-primary text-white border-primary">
         <CardContent className="pt-6">
           <div className="flex items-center space-x-2">
-            <div className="p-2 bg-primary/10 rounded-lg">
+            <div className="p-2 bg-white/10 rounded-lg">
               {record.addressType === AddressType.canister ? (
-                <Globe className="h-4 w-4 text-primary" />
+                <Globe className="h-4 w-4 text-white" />
               ) : (
-                <User className="h-4 w-4 text-primary" />
+                <User className="h-4 w-4 text-white" />
               )}
             </div>
             <div>
-              <span className="font-semibold">{record.name}</span>
-              <div className="text-sm text-muted-foreground font-mono">
+              <span className="font-semibold text-white">@{record.name}.icp</span>
+              <div className="text-sm text-white/80 font-mono">
                 {record.address}
               </div>
             </div>
