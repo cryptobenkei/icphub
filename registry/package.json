@@ -1,0 +1,45 @@
+{
+  "name": "context-registry",
+  "version": "1.0.0",
+  "description": "Context Registry - Motoko-based Internet Computer canister for seasonal name registrations",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "icphub": "./bin/icphub.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "deploy": "dfx deploy",
+    "deploy:local": "dfx start --background && dfx deploy",
+    "deploy:fresh": "npm run reset && npm run deploy:local && npm run dev init",
+    "generate": "dfx generate",
+    "stop": "dfx stop",
+    "clean": "dfx stop && rm -rf .dfx && rm -rf dist",
+    "reset": "dfx stop && rm -rf .dfx && rm -f .env",
+    "nuke": "npm run reset && rm -rf node_modules && rm -rf src/declarations",
+    "upgrade": "dfx deploy --mode upgrade",
+    "reinstall": "dfx deploy --mode reinstall",
+    "migrate": "tsx src/scripts/migrate.ts",
+    "test:migration": "tsx src/scripts/test-migration.ts",
+    "icphub": "tsx bin/icphub.ts",
+    "status": "npm run icphub status",
+    "wallet": "npm run icphub wallet",
+    "seasons": "npm run icphub seasons",
+    "season": "npm run icphub season",
+    "admins": "npm run icphub admins",
+    "name": "npm run icphub name"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@dfinity/agent": "^1.0.0",
+    "@dfinity/candid": "^1.0.0",
+    "@dfinity/principal": "^1.0.0",
+    "dotenv": "^17.2.2"
+  }
+}

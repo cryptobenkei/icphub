@@ -1,0 +1,154 @@
+type Version = 
+ record {
+   major: nat;
+   minor: nat;
+   patch: nat;
+ };
+type UserRole = 
+ variant {
+   admin;
+   guest;
+   user;
+ };
+type UserProfile = record {name: text;};
+type SeasonStatus = 
+ variant {
+   active;
+   cancelled;
+   draft;
+   ended;
+ };
+type Season = 
+ record {
+   createdAt: int;
+   endTime: int;
+   id: nat;
+   maxNameLength: nat;
+   maxNames: nat;
+   minNameLength: nat;
+   name: text;
+   price: nat;
+   startTime: int;
+   status: SeasonStatus;
+   updatedAt: int;
+ };
+type NameRecord = 
+ record {
+   address: text;
+   addressType: AddressType;
+   createdAt: int;
+   name: text;
+   owner: text;
+   seasonId: nat;
+   updatedAt: int;
+ };
+type MigrationInfo = 
+ record {
+   checksum: opt text;
+   fromVersion: Version;
+   logs: vec text;
+   success: bool;
+   timestamp: int;
+   toVersion: Version;
+ };
+type Metadata = 
+ record {
+   createdAt: int;
+   description: text;
+   image: text;
+   title: text;
+   updatedAt: int;
+ };
+type MarkdownContent = 
+ record {
+   content: text;
+   updatedAt: int;
+ };
+type FileReference = 
+ record {
+   hash: text;
+   path: text;
+ };
+type AddressType = 
+ variant {
+   canister;
+   identity;
+ };
+service : {
+  activateSeason: (seasonId: nat) -> ();
+  assignCallerUserRole: (user: principal, role: UserRole) -> ();
+  cancelSeason: (seasonId: nat) -> ();
+  createSeason: (name: text, startTime: int, endTime: int, maxNames: 
+   nat, minNameLength: nat, maxNameLength: nat, price: nat) -> (nat);
+  dropFileReference: (path: text) -> ();
+  emergencyRollback: (targetVersion: Version) ->
+   (record {
+      logs: vec text;
+      success: bool;
+    });
+  endSeason: (seasonId: nat) -> ();
+  getActiveSeason: () -> (Season) query;
+  getActiveSeasonInfo: () ->
+   (record {
+      availableNames: nat;
+      price: nat;
+      season: Season;
+    }) query;
+  getAdminCount: () -> (nat) query;
+  getAdminPrincipal: () -> (opt principal) query;
+  getAllAdmins: () -> (vec principal) query;
+  getCallerUserProfile: () -> (opt UserProfile) query;
+  getCallerUserRole: () -> (UserRole) query;
+  getCanisterPrincipal: () -> (principal) query;
+  getCanisterVersion: () -> (Version) query;
+  getCurrentTime: () -> (int) query;
+  getFileReference: (path: text) -> (FileReference) query;
+  getMarkdown: (name: text) -> (MarkdownContent) query;
+  getMarkdownContent: (name: text) ->
+   (variant {
+      err: text;
+      ok: MarkdownContent;
+    }) query;
+  getMetadata: (name: text) -> (variant {
+                                  err: text;
+                                  ok: Metadata;
+                                }) query;
+  getMetadataRecord: (name: text) -> (Metadata) query;
+  getMigrationHistory: () -> (vec MigrationInfo) query;
+  getNameRecord: (name: text) -> (variant {
+                                    err: text;
+                                    ok: NameRecord;
+                                  }) query;
+  getSeason: (seasonId: nat) -> (Season) query;
+  getUpgradeInfo: () ->
+   (record {
+      currentVersion: Version;
+      migrationHistory: vec MigrationInfo;
+      totalNameRecords: nat;
+      totalSeasons: nat;
+    }) query;
+  getUserProfile: (user: principal) -> (opt UserProfile) query;
+  hasRegisteredName: (owner: text) -> (bool) query;
+  initializeAccessControl: () -> ();
+  isCallerAdmin: () -> (bool) query;
+  listFileReferences: () -> (vec FileReference) query;
+  listNameRecords: () -> (vec NameRecord) query;
+  listSeasons: () -> (vec Season) query;
+  performDataMigration: (targetVersion: Version, validateIntegrity: bool) ->
+   (record {
+      checksum: opt text;
+      logs: vec text;
+      success: bool;
+    });
+  registerFileReference: (path: text, hash: text) -> ();
+  registerName: (name: text, address: text, addressType: AddressType, owner:
+   text, seasonId: nat) -> ();
+  saveCallerUserProfile: (profile: UserProfile) -> ();
+  saveMarkdown: (name: text, content: text) -> ();
+  saveMetadata: (name: text, title: text, description: text, image: text) ->
+   ();
+  validateSystemState: () -> (record {
+                                issues: vec text;
+                                valid: bool;
+                              }) query;
+}
