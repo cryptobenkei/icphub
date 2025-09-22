@@ -106,10 +106,10 @@ export default function App() {
             {/* Logo and Title */}
             <div className="flex items-center space-x-3">
               <div className="p-2 bg-primary/10 rounded-lg">
-                <img src="/assets/generated/icphubs-logo.png" alt="IcpHubs" className="h-6 w-6" />
+                <img src="/logo.png" alt="IcpHub" className="h-6 w-6" />
               </div>
               <div>
-                <h1 className="text-xl font-bold">IcpHubs</h1>
+                <h1 className="text-xl font-bold">IcpHub</h1>
                 <p className="text-sm text-muted-foreground">AI Community for ICP</p>
               </div>
             </div>

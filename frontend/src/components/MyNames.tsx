@@ -292,7 +292,7 @@ function NameManagement({ record }: { record: any }) {
 • Explaining how to use the markdown content editor
 • Providing guidance on DID files (for canisters)
 • Answering questions about your name registration
-• Helping you make the most of your IcpHubs membership
+• Helping you make the most of your IcpHub membership
 
 What would you like to explore?`;
     }

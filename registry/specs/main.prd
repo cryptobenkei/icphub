@@ -1,0 +1,21 @@
+1. First we deploy the canister
+2. Then we set an admin.
+- From that moment only admins can add/remove admins or any other role.
+- Admins can also withdraw ICP token from the contract
+
+3. The admin creates a new season. Only admin.
+4. The admin activates a season.
+- From this moemnt users can buy a name in the season with ñthe season limitations.
+
+5. The user that has control (owner) of the name can 
+- Edit the settings. It's the metadata document.
+- Edit the markdown document
+- Edit the DID document.
+- Only the owner can call these functions
+- We save the timestamp so we can read all the names created after a timestamp with just one call.
+- Every time we update a document we also save a new timestamp for the document. This way we can read all the documents updated after a timestamp.
+
+6. Only The admin can upgrade the contract.
+- To updgrade a contract we make changes to the motoko code.
+- Then we create a migration functions
+- Then we can migrate and decide the new version of the contract (minor, major or patch).

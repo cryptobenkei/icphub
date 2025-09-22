@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Brain, Search, FileText, Database, MessageSquare, Zap, Users, Globe, ArrowRight } from 'lucide-react';
+import { Brain, Search, FileText, Database, MessageSquare, Zap, Users, Globe, ArrowRight, Shield } from 'lucide-react';
 import { useGetActiveSeasonInfo, useHasRegisteredName, getSeasonNumber } from '../hooks/useQueries';
 import { useInternetIdentity } from '../hooks/useInternetIdentity';
 
@@ -45,253 +45,187 @@ export function Home() {
 
   return (
     <div className="space-y-8">
-      {/* Prominent "Get your name" button for users without a registered name */}
-      {showGetYourNameButton && (
-        <div className="text-center">
-          <Card className="border-primary bg-gradient-to-r from-primary/5 to-accent/5">
-            <CardContent className="py-6">
-              <div className="space-y-4">
-                <h3 className="text-2xl font-bold text-primary">Ready to join the community?</h3>
-                <p className="text-muted-foreground">
-                  Register your unique name and get instant access to Context Protocol
-                </p>
-                <Button 
-                  onClick={handleGetYourName}
-                  size="lg"
-                  className="bg-primary hover:bg-primary/90 text-lg px-8 py-3"
-                >
-                  Get your name
-                  <ArrowRight className="h-5 w-5 ml-2" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
 
       {/* Hero Section */}
       <div className="text-center space-y-6 pt-8">
         <div className="max-w-3xl mx-auto space-y-4">
-          <h2 className="text-4xl font-bold mb-4 mt-12">
-            Welcome to IcpHubs
+          <img src="/logo.png" alt="IcpHub" className="h-32 w-32 mx-auto mb-8" />
+          <h2 className="text-4xl font-bold mb-6">
+            The Knowledge-Powered Community
           </h2>
           <p className="text-xl text-muted-foreground mb-6">
-            The AI Community for Internet Computer Protocol
+            Register your unique name, upload your knowledge, and connect with verified members through AI-powered conversations.
           </p>
-          <p className="text-lg text-muted-foreground">
-            Join our AI-powered community by registering a unique name. Get instant access to Context Protocol 
-            and unlock the power of AI-driven querying for all your documents, data, and canisters.
-          </p>
+          <div className="grid md:grid-cols-4 gap-4 text-center mb-8">
+            <div className="space-y-2">
+              <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
+                <span className="text-sm font-semibold text-primary">1</span>
+              </div>
+              <h3 className="font-semibold">Register Your Name</h3>
+              <p className="text-sm text-muted-foreground">Secure your unique identity and get verified in the community</p>
+            </div>
+            <div className="space-y-2">
+              <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
+                <span className="text-sm font-semibold text-primary">2</span>
+              </div>
+              <h3 className="font-semibold">Share Knowledge</h3>
+              <p className="text-sm text-muted-foreground">Upload your documents, data, and expertise to your personal namespace</p>
+            </div>
+            <div className="space-y-2">
+              <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
+                <span className="text-sm font-semibold text-primary">3</span>
+              </div>
+              <h3 className="font-semibold">AI-Powered Chats</h3>
+              <p className="text-sm text-muted-foreground">Talk to individual members or the entire community using their collective knowledge</p>
+            </div>
+            <div className="space-y-2">
+              <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
+                <span className="text-sm font-semibold text-primary">4</span>
+              </div>
+              <h3 className="font-semibold">Canister Integration</h3>
+              <p className="text-sm text-muted-foreground">Interact with any canister using DID files through our AI chat interface</p>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <button className="bg-primary text-primary-foreground px-6 py-3 rounded-lg font-semibold hover:bg-primary/90 transition-colors">
+              Register Your Name
+            </button>
+            <button className="bg-secondary text-white px-6 py-3 rounded-lg font-semibold hover:bg-secondary/90 transition-colors">
+              Talk to the Community
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Current Season Info */}
-      {seasonLoading ? (
-        <Card>
-          <CardContent className="py-8">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-              <p className="text-muted-foreground">Loading season information...</p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : seasonInfo ? (
-        <Card className="border-primary/20">
-          <CardHeader className="text-center">
-            <CardTitle className="flex items-center justify-center space-x-2">
-              <Zap className="h-5 w-5 text-primary" />
-              <span>Current Registration Season</span>
-            </CardTitle>
-            <CardDescription>
-              Season {getSeasonNumber(seasonInfo.season.id)} - {seasonInfo.season.name}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid md:grid-cols-3 gap-6 text-center">
-              <div className="space-y-2">
-                <div className="text-2xl font-bold text-primary">
-                  {seasonInfo.availableNames.toString()}
-                </div>
-                <p className="text-sm text-muted-foreground">Names Available</p>
+      <div className="max-w-lg mx-auto">
+        {seasonLoading ? (
+          <Card className="shadow-sm">
+            <CardContent className="py-6">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto mb-2"></div>
+                <p className="text-sm text-muted-foreground">Loading season info...</p>
               </div>
-              <div className="space-y-2">
-                <div className="text-2xl font-bold text-accent">
-                  {seasonInfo.price.toString()} ICP
-                </div>
-                <p className="text-sm text-muted-foreground">Price per Name</p>
-              </div>
-              <div className="space-y-2">
-                <Badge variant="default" className="text-sm px-3 py-1">
-                  Season {getSeasonNumber(seasonInfo.season.id)}
-                </Badge>
-                <p className="text-sm text-muted-foreground">Active Season</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card className="border-muted">
-          <CardContent className="py-8 text-center">
-            <p className="text-muted-foreground">No active registration season at the moment.</p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Benefits Section */}
-      <div className="space-y-6">
-        <h3 className="text-2xl font-bold text-center">Membership Benefits</h3>
-        
-        <div className="grid md:grid-cols-2 gap-6">
-          <Card className="border-accent/20 hover:border-accent/40 transition-colors">
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <Brain className="h-5 w-5 text-accent" />
-                <span>Context Protocol Access</span>
-              </CardTitle>
-              <CardDescription>
-                Get a full one-year subscription to Context Protocol with your name registration
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li className="flex items-center space-x-2">
-                  <MessageSquare className="h-4 w-4" />
-                  <span>AI-powered chat interface</span>
-                </li>
-                <li className="flex items-center space-x-2">
-                  <Database className="h-4 w-4" />
-                  <span>Query your registered data</span>
-                </li>
-                <li className="flex items-center space-x-2">
-                  <Globe className="h-4 w-4" />
-                  <span>Canister interaction via AI</span>
-                </li>
-              </ul>
             </CardContent>
           </Card>
-
-          <Card className="border-primary/20 hover:border-primary/40 transition-colors">
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <FileText className="h-5 w-5 text-primary" />
-                <span>Document Management</span>
+        ) : seasonInfo ? (
+          <Card className="border-primary/20 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader className="text-center pb-4">
+              <CardTitle className="flex items-center justify-center space-x-2 text-lg">
+                <Zap className="h-4 w-4 text-primary" />
+                <span>Season {getSeasonNumber(seasonInfo.season.id)} • {seasonInfo.season.name}</span>
               </CardTitle>
-              <CardDescription>
-                Register and manage all your documents, data, and canisters under your name
-              </CardDescription>
             </CardHeader>
-            <CardContent>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li className="flex items-center space-x-2">
-                  <FileText className="h-4 w-4" />
-                  <span>Document storage & retrieval</span>
-                </li>
-                <li className="flex items-center space-x-2">
-                  <Database className="h-4 w-4" />
-                  <span>Data organization</span>
-                </li>
-                <li className="flex items-center space-x-2">
-                  <Search className="h-4 w-4" />
-                  <span>Instant search & access</span>
-                </li>
-              </ul>
+            <CardContent className="pt-0">
+              <div className="flex justify-center items-center space-x-8">
+                <div className="text-center">
+                  <div className="text-xl font-bold text-primary mb-1">
+                    {seasonInfo.availableNames.toString()}/{seasonInfo.season.maxNames.toString()}
+                  </div>
+                  <p className="text-xs text-muted-foreground">Available/Total</p>
+                </div>
+                <div className="w-px h-8 bg-border"></div>
+                <div className="text-center">
+                  <div className="text-xl font-bold text-secondary mb-1">
+                    {seasonInfo.price.toString()} ICP
+                  </div>
+                  <p className="text-xs text-muted-foreground">Subscription Price</p>
+                </div>
+              </div>
             </CardContent>
           </Card>
-        </div>
-      </div>
-
-      <Separator />
-
-      {/* Action Section */}
-      <div className="text-center space-y-6">
-        {isAuthenticated ? (
-          nameCheckLoading ? (
-            <div className="space-y-4">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-              <p className="text-muted-foreground">Checking your registration status...</p>
-            </div>
-          ) : hasRegisteredName ? (
-            <div className="space-y-4">
-              <div className="flex items-center justify-center space-x-2 text-green-600">
-                <Users className="h-5 w-5" />
-                <span className="font-medium">You're already a member!</span>
-              </div>
-              <p className="text-muted-foreground mb-6">
-                Access your dashboard to manage your documents and data
-              </p>
-              <Button 
-                onClick={handleViewDashboard}
-                size="lg"
-                className="bg-primary hover:bg-primary/90"
-              >
-                <img src="/assets/generated/dashboard-icon.png" alt="" className="h-4 w-4 mr-2" />
-                View Dashboard
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <h3 className="text-xl font-semibold">Ready to Join?</h3>
-              <p className="text-muted-foreground mb-6">
-                Register a name to become a member of the community
-              </p>
-              <Button 
-                onClick={handleRegisterName}
-                size="lg"
-                className="bg-primary hover:bg-primary/90"
-              >
-                <Users className="h-4 w-4 mr-2" />
-                Register Name
-              </Button>
-            </div>
-          )
         ) : (
-          <div className="space-y-4">
-            <h3 className="text-xl font-semibold">Get Started</h3>
-            <p className="text-muted-foreground mb-6">
-              Connect your wallet to register a name and join the community
-            </p>
-            <Button 
-              onClick={login}
-              disabled={isLoggingIn}
-              size="lg"
-              className="bg-primary hover:bg-primary/90"
-            >
-              <Users className="h-4 w-4 mr-2" />
-              {isLoggingIn ? 'Connecting...' : 'Connect & Register'}
-            </Button>
-          </div>
+          <Card className="border-muted shadow-sm">
+            <CardContent className="py-6 text-center">
+              <p className="text-sm text-muted-foreground">No active registration season at the moment.</p>
+            </CardContent>
+          </Card>
         )}
       </div>
 
-      {/* Community Stats */}
-      <Card className="bg-gradient-to-r from-primary/5 to-accent/5">
-        <CardHeader className="text-center">
-          <CardTitle>Join the Growing Community</CardTitle>
-          <CardDescription>
-            Be part of the future of AI-powered development on the Internet Computer
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-            <div className="space-y-1">
-              <div className="text-2xl font-bold text-primary">AI</div>
-              <p className="text-xs text-muted-foreground">Powered</p>
+      {/* Context Protocol Section */}
+      <div className="space-y-6">
+        <Card className="border-primary/20 hover:border-primary/30 transition-colors">
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <Brain className="h-5 w-5 text-primary" />
+              <span>Powered by Context Protocol</span>
+            </CardTitle>
+            <CardDescription>
+              IcpHub leverages Context Protocol to provide advanced AI capabilities
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground mb-4">
+              When you register a name, you automatically receive a basic subscription to Context Protocol.
+              Each name gets its own named and verified MCP (Model Context Protocol) server, enabling seamless
+              AI interactions with your data and the broader ICP ecosystem.
+            </p>
+            <div className="flex items-center space-x-2 text-sm text-primary">
+              <span className="w-2 h-2 bg-primary rounded-full"></span>
+              <span>Basic Context Protocol subscription included</span>
             </div>
-            <div className="space-y-1">
-              <div className="text-2xl font-bold text-accent">ICP</div>
-              <p className="text-xs text-muted-foreground">Native</p>
+            <div className="flex items-center space-x-2 text-sm text-primary mt-2">
+              <span className="w-2 h-2 bg-primary rounded-full"></span>
+              <span>Named and verified MCP server for each registration</span>
             </div>
-            <div className="space-y-1">
-              <div className="text-2xl font-bold text-primary">1 Year</div>
-              <p className="text-xs text-muted-foreground">Subscription</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-secondary/20 hover:border-secondary/30 transition-colors">
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <Shield className="h-5 w-5 text-secondary" />
+              <span>Governance & Verification</span>
+            </CardTitle>
+            <CardDescription>
+              Building trust through community governance and reputation systems
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground mb-4">
+              We're developing a governance system that will add reputation scoring and name verification.
+              Community members will be able to build trust through verified contributions, creating a
+              reliable network of authenticated knowledge providers.
+            </p>
+            <div className="flex items-center space-x-2 text-sm text-secondary">
+              <span className="w-2 h-2 bg-secondary rounded-full"></span>
+              <span>Reputation-based verification system (coming soon)</span>
             </div>
-            <div className="space-y-1">
-              <div className="text-2xl font-bold text-accent">∞</div>
-              <p className="text-xs text-muted-foreground">Possibilities</p>
+            <div className="flex items-center space-x-2 text-sm text-secondary mt-2">
+              <span className="w-2 h-2 bg-secondary rounded-full"></span>
+              <span>Community-driven governance for trust building</span>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+
+        <Card className="border-accent/20 hover:border-accent/30 transition-colors">
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <Database className="h-5 w-5 text-accent" />
+              <span>Canister Integration</span>
+            </CardTitle>
+            <CardDescription>
+              Direct interaction with ICP canisters through AI-powered chat
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground mb-4">
+              Names can be assigned to canisters with uploaded DID files. Through Context Protocol's
+              MCP servers, you can interact with any canister via natural language chat, making
+              complex blockchain interactions as simple as having a conversation.
+            </p>
+            <div className="flex items-center space-x-2 text-sm text-accent">
+              <span className="w-2 h-2 bg-accent rounded-full"></span>
+              <span>Assign names to canisters with DID file upload</span>
+            </div>
+            <div className="flex items-center space-x-2 text-sm text-accent mt-2">
+              <span className="w-2 h-2 bg-accent rounded-full"></span>
+              <span>Chat-based canister interaction via Context Protocol</span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

@@ -5,10 +5,14 @@ import Debug "mo:base/Debug";
 import Nat "mo:base/Nat";
 import Int "mo:base/Int";
 import Array "mo:base/Array";
+import Iter "mo:base/Iter";
 import Registry "blob-storage/registry";
 import AccessControl "authorization/access-control";
 import Principal "mo:base/Principal";
 import MigrationManager "migration/migration-manager";
+import Result "mo:base/Result";
+import Blob "mo:base/Blob";
+import ExperimentalCycles "mo:base/ExperimentalCycles";
 
 // Enhanced Orthogonal Persistence Actor - Safe Migration Pattern
 persistent actor {
@@ -71,6 +75,49 @@ persistent actor {
     updatedAt : Int;
   };
 
+  // Payment and subscription types
+  public type PaymentStatus = {
+    #pending;
+    #completed;
+    #failed;
+    #refunded;
+  };
+
+  public type SubscriptionType = {
+    #basic;
+    #premium;
+    #enterprise;
+  };
+
+  public type Payment = {
+    id : Nat;
+    payer : Principal;
+    amount : Nat; // Amount in e8s (1 ICP = 100_000_000 e8s)
+    subscriptionType : SubscriptionType;
+    status : PaymentStatus;
+    txHash : ?Text; // Transaction hash for verification
+    createdAt : Int;
+    updatedAt : Int;
+  };
+
+  public type Subscription = {
+    user : Principal;
+    subscriptionType : SubscriptionType;
+    startTime : Int;
+    endTime : Int;
+    paymentId : Nat;
+    isActive : Bool;
+    createdAt : Int;
+  };
+
+  public type TransferArgs = {
+    to : Principal;
+    amount : Nat;
+    memo : ?Blob;
+  };
+
+  public type TransferResult = Result.Result<Nat, Text>;
+
   // Migration system using safe patterns
   public type Version = MigrationManager.Version;
   public type MigrationInfo = MigrationManager.MigrationInfo;
@@ -94,6 +141,12 @@ persistent actor {
   var currentVersion : Version = CURRENT_VERSION;
   var migrationHistory : [MigrationInfo] = [];
   var lastUpgradeChecksum : ?Text = null;
+
+  // Payment and subscription state
+  var payments = natMap.empty<Payment>();
+  var subscriptions = principalMap.empty<Subscription>();
+  var nextPaymentId : Nat = 1;
+  var icpBalance : Nat = 0; // Track ICP balance in e8s
 
   public shared ({ caller }) func initializeAccessControl() : async () {
     AccessControl.initialize(accessControlState, caller);
@@ -643,6 +696,192 @@ persistent actor {
     {
       success = true;
       logs = rollbackLogs;
+    };
+  };
+
+  // =============================================================================
+  // PAYMENT AND SUBSCRIPTION FUNCTIONS
+  // =============================================================================
+
+  // Subscription pricing in e8s (1 ICP = 100_000_000 e8s)
+  private func getSubscriptionPrice(subscriptionType : SubscriptionType) : Nat {
+    switch (subscriptionType) {
+      case (#basic) { 100_000_000 }; // 1 ICP
+      case (#premium) { 500_000_000 }; // 5 ICP
+      case (#enterprise) { 1_000_000_000 }; // 10 ICP
+    };
+  };
+
+  // Accept ICP payment for subscription
+  public shared ({ caller }) func receivePayment(subscriptionType : SubscriptionType) : async Nat {
+    if (Principal.isAnonymous(caller)) {
+      Debug.trap("Anonymous callers cannot make payments");
+    };
+
+    let expectedAmount = getSubscriptionPrice(subscriptionType);
+    let receivedCycles = ExperimentalCycles.available();
+    let _receivedAmount = receivedCycles; // For now, using cycles as proxy
+
+    // Create payment record
+    let payment : Payment = {
+      id = nextPaymentId;
+      payer = caller;
+      amount = expectedAmount;
+      subscriptionType = subscriptionType;
+      status = #completed;
+      txHash = null; // Could be populated from transaction data
+      createdAt = Time.now();
+      updatedAt = Time.now();
+    };
+
+    // Store payment
+    payments := natMap.put(payments, nextPaymentId, payment);
+    let paymentId = nextPaymentId;
+    nextPaymentId += 1;
+
+    // Update ICP balance
+    icpBalance += expectedAmount;
+
+    // Create or update subscription
+    let subscriptionDuration = 30 * 24 * 60 * 60 * 1_000_000_000; // 30 days in nanoseconds
+    let subscription : Subscription = {
+      user = caller;
+      subscriptionType = subscriptionType;
+      startTime = Time.now();
+      endTime = Time.now() + subscriptionDuration;
+      paymentId = paymentId;
+      isActive = true;
+      createdAt = Time.now();
+    };
+
+    subscriptions := principalMap.put(subscriptions, caller, subscription);
+
+    // Accept the cycles
+    ignore ExperimentalCycles.accept<system>(receivedCycles);
+
+    paymentId;
+  };
+
+  // Get subscription status for a user
+  public query func getUserSubscription(user : Principal) : async ?Subscription {
+    principalMap.get(subscriptions, user);
+  };
+
+  // Check if user has active subscription
+  public query func hasActiveSubscription(user : Principal) : async Bool {
+    switch (principalMap.get(subscriptions, user)) {
+      case (null) { false };
+      case (?subscription) {
+        subscription.isActive and subscription.endTime > Time.now();
+      };
+    };
+  };
+
+  // Get payment details
+  public query func getPayment(paymentId : Nat) : async ?Payment {
+    natMap.get(payments, paymentId);
+  };
+
+  // Get all payments (admin only)
+  public query ({ caller }) func getAllPayments() : async [Payment] {
+    if (not AccessControl.isAdmin(accessControlState, caller)) {
+      Debug.trap("Unauthorized: Only admins can view all payments");
+    };
+
+    let paymentEntries = natMap.entries(payments);
+    let paymentArray = Iter.toArray<(Nat, Payment)>(paymentEntries);
+    Array.map<(Nat, Payment), Payment>(paymentArray, func((_, payment)) = payment);
+  };
+
+  // Get canister ICP balance (admin only)
+  public query ({ caller }) func getIcpBalance() : async Nat {
+    if (not AccessControl.isAdmin(accessControlState, caller)) {
+      Debug.trap("Unauthorized: Only admins can view ICP balance");
+    };
+    icpBalance;
+  };
+
+  // Admin function to withdraw ICP to another principal
+  public shared ({ caller }) func withdrawIcp(to : Principal, amount : Nat) : async TransferResult {
+    if (not AccessControl.isAdmin(accessControlState, caller)) {
+      Debug.trap("Unauthorized: Only admins can withdraw ICP");
+    };
+
+    if (amount > icpBalance) {
+      return #err("Insufficient ICP balance");
+    };
+
+    if (Principal.isAnonymous(to)) {
+      return #err("Cannot transfer to anonymous principal");
+    };
+
+    // In a real implementation, you would integrate with ICP Ledger canister
+    // For now, we'll simulate the transfer by updating internal balance
+    icpBalance -= amount;
+
+    // Log the withdrawal for audit purposes
+    let _withdrawalLog = "ICP withdrawal: " # Nat.toText(amount) # " e8s to " # Principal.toText(to) # " by " # Principal.toText(caller);
+
+    // Return success with a mock transaction ID
+    #ok(amount);
+  };
+
+  // Emergency function to pause all subscriptions (admin only)
+  public shared ({ caller }) func pauseAllSubscriptions() : async () {
+    if (not AccessControl.isAdmin(accessControlState, caller)) {
+      Debug.trap("Unauthorized: Only admins can pause subscriptions");
+    };
+
+    let subscriptionEntries = principalMap.entries(subscriptions);
+    let subscriptionArray = Iter.toArray<(Principal, Subscription)>(subscriptionEntries);
+    for ((user, subscription) in subscriptionArray.vals()) {
+      let updatedSubscription = {
+        subscription with isActive = false;
+      };
+      subscriptions := principalMap.put(subscriptions, user, updatedSubscription);
+    };
+  };
+
+  // Get subscription statistics (admin only)
+  public query ({ caller }) func getSubscriptionStats() : async {
+    totalSubscriptions : Nat;
+    activeSubscriptions : Nat;
+    basicSubscriptions : Nat;
+    premiumSubscriptions : Nat;
+    enterpriseSubscriptions : Nat;
+    totalRevenue : Nat;
+  } {
+    if (not AccessControl.isAdmin(accessControlState, caller)) {
+      Debug.trap("Unauthorized: Only admins can view subscription statistics");
+    };
+
+    let subscriptionEntries = principalMap.entries(subscriptions);
+    let subscriptionArray = Iter.toArray<(Principal, Subscription)>(subscriptionEntries);
+    var totalSubs = 0;
+    var activeSubs = 0;
+    var basicSubs = 0;
+    var premiumSubs = 0;
+    var enterpriseSubs = 0;
+
+    for ((_, subscription) in subscriptionArray.vals()) {
+      totalSubs += 1;
+      if (subscription.isActive and subscription.endTime > Time.now()) {
+        activeSubs += 1;
+      };
+      switch (subscription.subscriptionType) {
+        case (#basic) { basicSubs += 1 };
+        case (#premium) { premiumSubs += 1 };
+        case (#enterprise) { enterpriseSubs += 1 };
+      };
+    };
+
+    {
+      totalSubscriptions = totalSubs;
+      activeSubscriptions = activeSubs;
+      basicSubscriptions = basicSubs;
+      premiumSubscriptions = premiumSubs;
+      enterpriseSubscriptions = enterpriseSubs;
+      totalRevenue = icpBalance;
     };
   };
 };

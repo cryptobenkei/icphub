@@ -1,0 +1,446 @@
+# Rate Limiting Integration PRD
+## Season Management Canister Enhancement
+
+---
+
+## **Executive Summary**
+
+This PRD outlines the integration of comprehensive rate limiting mechanisms into the existing Season Management Canister to protect against cycle exhaustion attacks, ensure fair resource usage, and maintain system stability while preserving the user experience for legitimate users.
+
+---
+
+## **Current System Analysis**
+
+### **Existing Architecture Review**
+Based on analysis of your `main.mo`, `access-control.mo`, and `registry.mo` files:
+
+**Main Canister (`main.mo`):**
+- Manages seasons, name registrations, user profiles, and file references
+- Implements role-based access control (admin, user, guest)
+- Contains resource-intensive operations like `registerName`, `createSeason`, `saveMetadata`
+- Currently has **NO rate limiting protection**
+
+**Access Control (`access-control.mo`):**
+- Provides user role management and permission checking
+- Uses `Principal` for user identification
+- Already has infrastructure for user tracking
+
+**Registry (`registry.mo`):**
+- Manages file references and blob storage
+- Contains potentially expensive operations like `add`, `remove`, and `refreshAuthCache`
+
+### **Vulnerability Assessment**
+**High-Risk Functions Identified:**
+1. `registerName` - Could be spammed to exhaust registration slots
+2. `saveMetadata` - Heavy storage operations
+3. `saveMarkdown` - Large content storage
+4. `registerFileReference` - File system operations
+5. `createSeason` - Admin-only but still vulnerable to admin abuse
+
+**Current Weaknesses:**
+- No `canister_inspect_message` implementation
+- No per-user usage tracking
+- No temporal restrictions on expensive operations
+- No protection against rapid successive calls
+
+---
+
+## **Product Requirements**
+
+### **Functional Requirements**
+
+#### **FR1: Multi-Level Rate Limiting**
+- **User-based rate limiting** by Principal ID
+- **Function-specific rate limits** for different operations
+- **Role-based rate limits** (different limits for admin/user/guest)
+- **Global canister protection** against overall request flooding
+
+#### **FR2: Configurable Rate Limiting Policies**
+- **Time-window based limiting** (per minute, hour, day)
+- **Sliding window algorithm** for smooth rate limiting
+- **Burst allowance** for legitimate high-frequency usage
+- **Configurable limits** per function and user role
+
+#### **FR3: Cycle Protection Mechanisms**
+- **Early request filtering** via `canister_inspect_message`
+- **Cycle consumption monitoring** per user/function
+- **Automatic circuit breaker** when cycle levels are low
+- **Priority queuing** for critical operations
+
+#### **FR4: User Experience Preservation**
+- **Graceful degradation** when limits are approached
+- **Clear error messages** with rate limit status
+- **Rate limit status API** for frontend integration
+- **Whitelist mechanism** for trusted users/admins
+
+### **Non-Functional Requirements**
+
+#### **NFR1: Performance**
+- Rate limiting checks must complete in <100ms
+- Minimal cycle overhead (<1% of function cost)
+- Efficient storage of rate limiting data
+
+#### **NFR2: Reliability**
+- Rate limiting must be fail-safe (default to allow if uncertain)
+- Persistent rate limiting data across upgrades
+- Automatic cleanup of expired rate limiting entries
+
+#### **NFR3: Scalability**
+- Support for 10,000+ unique users
+- Configurable memory limits for rate limiting data
+- Efficient pruning of old rate limiting records
+
+---
+
+## **Technical Design**
+
+### **Rate Limiting Module Structure**
+
+```motoko
+module RateLimiter {
+    public type TimeWindow = {
+        #minute: Nat;
+        #hour: Nat; 
+        #day: Nat;
+    };
+    
+    public type RateLimit = {
+        maxRequests: Nat;
+        window: TimeWindow;
+        burst: Nat; // Allow burst of requests
+    };
+    
+    public type UserUsage = {
+        requests: [(Int, Text)]; // (timestamp, function_name)
+        lastRequest: Int;
+        totalRequests: Nat;
+        isBlocked: Bool;
+        blockUntil: ?Int;
+    };
+    
+    public type RateLimitConfig = {
+        globalLimits: HashMap<Text, RateLimit>;
+        roleLimits: HashMap<(AccessControl.UserRole, Text), RateLimit>;
+        whitelistedUsers: Set<Principal>;
+        circuitBreakerThreshold: Nat; // Minimum cycles before rate limiting kicks in
+    };
+}
+```
+
+### **Integration Points**
+
+#### **1. Main Canister Integration**
+```motoko
+// Add to main.mo imports
+import RateLimiter "rate-limiter";
+
+// Add to stable variables
+stable var rateLimitingData : [(Principal, RateLimiter.UserUsage)] = [];
+stable var rateLimitConfig : RateLimiter.RateLimitConfig = defaultRateLimitConfig();
+
+// Add to working variables  
+transient var userUsage = principalMap.fromIter<RateLimiter.UserUsage>(rateLimitingData.vals());
+transient let rateLimiter = RateLimiter.init(rateLimitConfig);
+```
+
+#### **2. Function-Level Protection**
+```motoko
+public shared ({ caller }) func registerName(
+    name : Text, 
+    address : Text, 
+    addressType : AddressType, 
+    owner : Text, 
+    seasonId : Nat
+) : async Result<(), Text> {
+    // Rate limiting check
+    switch (RateLimiter.checkRateLimit(rateLimiter, caller, "registerName", userUsage)) {
+        case (#error(msg)) { return #err(msg) };
+        case (#ok) {};
+    };
+    
+    // Record usage
+    RateLimiter.recordUsage(rateLimiter, caller, "registerName", userUsage);
+    
+    // Original function logic
+    // ... existing implementation
+};
+```
+
+#### **3. Canister Inspect Message Implementation**
+```motoko
+system func inspect({
+    caller : Principal;
+    method_name : Text;
+    arg : Blob;
+    msg : Any;
+}) : Bool {
+    // Early filtering before cycle consumption
+    switch (method_name) {
+        case ("registerName" or "saveMetadata" or "saveMarkdown") {
+            RateLimiter.preCheckRateLimit(rateLimiter, caller, method_name, userUsage)
+        };
+        case (_) { true }; // Allow other functions
+    }
+};
+```
+
+### **Rate Limiting Policies**
+
+#### **Default Rate Limits by Function**
+```motoko
+let defaultLimits = [
+    ("registerName", { maxRequests = 5; window = #hour(1); burst = 2 }),
+    ("saveMetadata", { maxRequests = 20; window = #hour(1); burst = 5 }),
+    ("saveMarkdown", { maxRequests = 10; window = #hour(1); burst = 3 }),
+    ("createSeason", { maxRequests = 2; window = #day(1); burst = 0 }),
+    ("registerFileReference", { maxRequests = 50; window = #hour(1); burst = 10 })
+];
+```
+
+#### **Role-Based Rate Limits**
+```motoko
+let roleLimits = [
+    ((#admin, "createSeason"), { maxRequests = 10; window = #day(1); burst = 2 }),
+    ((#user, "registerName"), { maxRequests = 5; window = #hour(1); burst = 1 }),
+    ((#guest, "registerName"), { maxRequests = 1; window = #day(1); burst = 0 })
+];
+```
+
+---
+
+## **Implementation Plan**
+
+### **Phase 1: Core Rate Limiting Infrastructure (Week 1-2)**
+
+#### **Deliverables:**
+- [ ] `RateLimiter` module implementation
+- [ ] Basic rate limiting data structures
+- [ ] Sliding window algorithm implementation
+- [ ] Unit tests for core functionality
+
+#### **Tasks:**
+1. Create `rate-limiter.mo` module
+2. Implement sliding window rate limiting algorithm
+3. Add persistence mechanisms for rate limiting data
+4. Create configuration management system
+5. Implement cleanup mechanisms for expired data
+
+### **Phase 2: Integration with Existing Canister (Week 3-4)**
+
+#### **Deliverables:**
+- [ ] `canister_inspect_message` implementation
+- [ ] Integration with all public functions
+- [ ] Access control integration
+- [ ] Migration scripts for existing data
+
+#### **Tasks:**
+1. Add rate limiting to all identified high-risk functions
+2. Implement `inspect` system function
+3. Integrate with existing access control system
+4. Add stable variable management
+5. Create upgrade migration logic
+
+### **Phase 3: Advanced Features (Week 5-6)**
+
+#### **Deliverables:**
+- [ ] Circuit breaker mechanism
+- [ ] Admin rate limit management functions
+- [ ] User rate limit status API
+- [ ] Whitelist management
+
+#### **Tasks:**
+1. Implement cycle-based circuit breaker
+2. Add admin functions for rate limit configuration
+3. Create user-facing rate limit status endpoints
+4. Implement priority queuing for critical operations
+5. Add comprehensive logging and monitoring
+
+### **Phase 4: Testing & Deployment (Week 7-8)**
+
+#### **Deliverables:**
+- [ ] Comprehensive test suite
+- [ ] Load testing results
+- [ ] Production deployment plan
+- [ ] Monitoring dashboard
+
+#### **Tasks:**
+1. Create comprehensive test scenarios
+2. Perform load testing with PocketIC
+3. Validate cycle consumption impact
+4. Create deployment runbook
+5. Set up monitoring and alerting
+
+---
+
+## **API Specifications**
+
+### **New Public Functions**
+
+#### **Rate Limit Management (Admin Only)**
+```motoko
+// Get current rate limiting configuration
+public query ({ caller }) func getRateLimitConfig() : async Result<RateLimiter.RateLimitConfig, Text>;
+
+// Update rate limits for specific functions
+public shared ({ caller }) func updateRateLimit(
+    functionName: Text, 
+    limit: RateLimiter.RateLimit
+) : async Result<(), Text>;
+
+// Add user to whitelist
+public shared ({ caller }) func whitelistUser(user: Principal) : async Result<(), Text>;
+
+// Get user's current rate limit status
+public query ({ caller }) func getRateLimitStatus(user: ?Principal) : async RateLimiter.UserUsage;
+```
+
+#### **User-Facing Functions**
+```motoko
+// Check if user can make a specific call
+public query ({ caller }) func canMakeCall(functionName: Text) : async Bool;
+
+// Get user's remaining quota
+public query ({ caller }) func getQuotaRemaining(functionName: Text) : async Nat;
+```
+
+### **Enhanced Error Handling**
+```motoko
+public type RateLimitError = {
+    #rateLimitExceeded: {
+        limit: Nat;
+        window: Text;
+        resetTime: Int;
+        retryAfter: Nat;
+    };
+    #temporarilyBlocked: {
+        blockedUntil: Int;
+        reason: Text;
+    };
+    #circuitBreakerActive: {
+        cyclesRemaining: Nat;
+        estimatedRestoreTime: Int;
+    };
+};
+```
+
+---
+
+## **Configuration Management**
+
+### **Environment-Specific Configurations**
+
+#### **Development Configuration**
+- More permissive limits for testing
+- Shorter time windows for rapid testing
+- Disabled circuit breaker
+
+#### **Production Configuration**  
+- Strict rate limits based on expected usage patterns
+- Long time windows for sustained protection
+- Active circuit breaker protection
+
+### **Dynamic Configuration Updates**
+```motoko
+// Admin function to update configuration without upgrade
+public shared ({ caller }) func updateRateLimitConfiguration(
+    newConfig: RateLimiter.RateLimitConfig
+) : async Result<(), Text> {
+    if (not AccessControl.isAdmin(accessControlState, caller)) {
+        return #err("Only admins can update rate limit configuration");
+    };
+    
+    rateLimitConfig := newConfig;
+    #ok(())
+};
+```
+
+---
+
+## **Monitoring and Observability**
+
+### **Metrics to Track**
+- Rate limit violations per user/function
+- Cycle consumption per function call
+- Circuit breaker activations
+- False positive rate limit triggers
+- User experience impact metrics
+
+### **Alerting Thresholds**
+- More than 10 rate limit violations per hour
+- Circuit breaker activation
+- Cycle levels below 1T cycles
+- Abnormal request patterns detected
+
+### **Logging Requirements**
+```motoko
+// Add structured logging for rate limiting events
+Debug.print("[RATE_LIMIT] User: " # Principal.toText(caller) # 
+           " Function: " # functionName # 
+           " Status: " # statusMessage #
+           " Remaining: " # Nat.toText(remaining));
+```
+
+---
+
+## **Risk Assessment & Mitigation**
+
+### **High Risk: False Positives**
+**Risk:** Legitimate users being blocked
+**Mitigation:** 
+- Implement burst allowance
+- Admin override capabilities
+- Gradual enforcement rollout
+
+### **Medium Risk: Performance Impact**
+**Risk:** Rate limiting adds latency
+**Mitigation:**
+- Optimize data structures
+- Implement efficient cleanup
+- Cache rate limiting decisions
+
+### **Low Risk: Configuration Errors**
+**Risk:** Incorrect rate limits affect UX
+**Mitigation:**
+- Configuration validation
+- Rollback mechanisms
+- A/B testing for limit changes
+
+---
+
+## **Success Metrics**
+
+### **Primary KPIs**
+- **Cycle Consumption Stability:** <5% variation in daily cycle consumption
+- **Attack Prevention:** 0 successful cycle exhaustion attacks
+- **User Experience:** <1% increase in function call latency
+- **System Reliability:** 99.9% uptime maintained
+
+### **Secondary KPIs**
+- Rate limit violation rate <0.1% of total requests
+- False positive rate <0.01% of legitimate requests
+- Admin configuration changes applied <5 minutes
+- Rate limiting data storage <10MB of canister memory
+
+---
+
+## **Future Enhancements**
+
+### **Phase 2 Features**
+- Machine learning-based anomaly detection
+- Dynamic rate limit adjustment based on usage patterns
+- Integration with external monitoring systems
+- Multi-canister rate limiting coordination
+
+### **Advanced Security Features**
+- IP-based rate limiting (when available)
+- Behavioral analysis for bot detection
+- Integration with reputation systems
+- Automated response to attack patterns
+
+---
+
+## **Conclusion**
+
+This rate limiting integration will transform your Season Management Canister into a robust, production-ready system capable of handling malicious traffic while maintaining excellent user experience for legitimate users. The phased approach ensures minimal disruption during implementation while providing immediate protection against the most critical vulnerabilities.
+
+The implementation leverages your existing access control infrastructure and extends it with sophisticated rate limiting capabilities that align with ICP's unique reverse gas model architecture.

@@ -105,3 +105,4 @@ npm run status
 - **Season Constraints**: Only one active season allowed at a time
 - **Frontend Auth**: Always verify Internet Identity before backend calls
 - **Breaking Changes**: Require reinstall and data migration
+- use the context7mcp to ask about ICP docs

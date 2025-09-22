@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 
 // Utility function to convert backend season ID to user-friendly season number
 export function getSeasonNumber(seasonId: bigint): number {
-  return Number(seasonId) + 1;
+  return Number(seasonId);
 }
 
 // User Profile Queries
@@ -97,7 +97,7 @@ export function useGetCandidFile() {
       
       // Generate a placeholder Candid file based on the known interface
       // This is a temporary solution until the backend implements getCandidFile()
-      const candidContent = `// Candid Interface Definition for IcpHubs Name Registry
+      const candidContent = `// Candid Interface Definition for IcpHub Name Registry
 // This is a generated placeholder - actual implementation needed in backend
 
 type AddressType = variant {

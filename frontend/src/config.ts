@@ -1,4 +1,4 @@
-import { CreateActorOptions } from 'declarations/backend';
+import type { CreateActorOptions } from '@dfinity/agent';
 import { createActor, canisterId, type backendInterface } from './backend';
 
 const DEFAULT_STORAGE_GATEWAY_URL = 'https://dev-blob.caffeine.ai';
@@ -75,6 +75,6 @@ export async function createActorWithConfig(options?: CreateActorOptions): Promi
             }
         };
     }
-    return createActor(config.backend_canister_id, options, processError);
+    return createActor(config.backend_canister_id, options) as Promise<backendInterface>;
 }
 
