@@ -25,11 +25,22 @@ import { useActor } from '../hooks/useActor';
 // Whitelist configuration
 const ADMIN_WHITELIST = ['cryptobenkei'];
 
+// Alex Puig profile for cryptobenkei simulation
+const alexProfile = {
+  name: "Alex Puig",
+  title: "Founder @ Context Protocol | AI, Agentic economy, Blockchain, Open Data, Digital Identity",
+  location: "Barcelona, Catalonia, Spain",
+  shortIntro: "I'm Alex Puig, an identity strategist and tech entrepreneur building the verified AI-native internet. I specialize in complex deep tech infrastructure including self-sovereign identity, blockchain, Zero Knowledge Proofs, and now RAG systems and LLMs.",
+  mediumIntro: "I'm Alex Puig, founder of Context Protocol. I'm working on creating blockchain-verified communities where AI agents can trust and transact with authentic data sources. My background includes founding Alastria Blockchain Ecosystem (Spain's first national semi-public blockchain platform) and leading the Technical Team at Caelum Labs. I believe that as AI agents become the primary interface for digital commerce, we need infrastructure to ensure they interact with verified, authentic sources.",
+  fromResponse: "I'm from Barcelona"
+};
+
 interface ChatMessage {
   id: string;
   content: string;
   sender: 'user' | 'ai';
   timestamp: Date;
+  stage?: 'init' | 'identity' | 'location' | 'done'; // Track simulation stage
 }
 
 export function MyNames() {
@@ -142,12 +153,20 @@ function NameManagement({ record }: { record: any }) {
   const [localMarkdownContent, setLocalMarkdownContent] = useState('');
   const [isEditingMarkdown, setIsEditingMarkdown] = useState(false);
   const [localDidContent, setLocalDidContent] = useState('');
+
+  // Determine if this is the cryptobenkei simulation
+  const isCryptobenkei = record.name === 'cryptobenkei';
+  const [simulationStage, setSimulationStage] = useState<'init' | 'identity' | 'location' | 'done'>('init');
+
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
       id: '1',
-      content: `Hello! I'm the AI assistant for ${record.name}. I can help you with questions about the content, metadata, and capabilities associated with this name. What would you like to know?`,
+      content: isCryptobenkei
+        ? `🤖 Identity Simulation Active. Ask "Who are you?" to begin.`
+        : `Hello! I'm the AI assistant for ${record.name}. I can help you with questions about the content, metadata, and capabilities associated with this name. What would you like to know?`,
       sender: 'ai',
-      timestamp: new Date()
+      timestamp: new Date(),
+      stage: 'init'
     }
   ]);
   const [currentMessage, setCurrentMessage] = useState('');
@@ -303,70 +322,73 @@ function NameManagement({ record }: { record: any }) {
     };
 
     setChatMessages(prev => [...prev, userMessage]);
+    const originalMessage = currentMessage;
     setCurrentMessage('');
     setSendingMessage(true);
 
     // Simulate AI response delay
     setTimeout(() => {
-      const aiResponse = generateAIResponse(currentMessage, record.name);
+      let aiResponse: string;
+      let nextStage = simulationStage;
+
+      if (isCryptobenkei) {
+        // Handle cryptobenkei simulation
+        aiResponse = handleCryptobenkeiSimulation(originalMessage, simulationStage);
+
+        // Update stage based on the question
+        if (simulationStage === 'init' &&
+            (originalMessage.toLowerCase().includes('who are you') ||
+             originalMessage.toLowerCase().includes('who r u'))) {
+          nextStage = 'identity';
+          setSimulationStage('identity');
+        } else if (simulationStage === 'identity' &&
+                   (originalMessage.toLowerCase().includes('where are you from') ||
+                    originalMessage.toLowerCase().includes('where r u from'))) {
+          nextStage = 'location';
+          setSimulationStage('location');
+        } else if (simulationStage === 'location') {
+          nextStage = 'done';
+          setSimulationStage('done');
+        }
+      } else {
+        // For non-cryptobenkei names, show the AI activation message
+        aiResponse = `🤖 We will activate AI soon. Canisters can have their own MCP (Model Context Protocol) servers for enhanced AI interactions.`;
+      }
+
       const aiMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         content: aiResponse,
         sender: 'ai',
-        timestamp: new Date()
+        timestamp: new Date(),
+        stage: nextStage
       };
       setChatMessages(prev => [...prev, aiMessage]);
       setSendingMessage(false);
     }, 1000 + Math.random() * 2000); // 1-3 second delay
   };
 
-  const generateAIResponse = (userMessage: string, nameRecord: string): string => {
+  const handleCryptobenkeiSimulation = (userMessage: string, stage: string): string => {
     const lowerMessage = userMessage.toLowerCase();
-    
-    if (lowerMessage.includes('hello') || lowerMessage.includes('hi')) {
-      return `Hello! I'm the AI for ${nameRecord}. I'm here to help you understand and interact with the content and capabilities associated with this name. How can I assist you today?`;
-    }
-    
-    if (lowerMessage.includes('metadata') || lowerMessage.includes('profile') || lowerMessage.includes('settings')) {
-      return `I can help you understand the settings associated with ${nameRecord}. This includes profile information like name, description, X handle, LinkedIn profile, and website URL. You can edit this information in the settings tab. What specific settings would you like to know about?`;
-    }
-    
-    if (lowerMessage.includes('markdown') || lowerMessage.includes('content')) {
-      return `The markdown content for ${nameRecord} contains detailed documentation and information. This is where you can store rich text content, documentation, or any other information you want to associate with your name. Would you like me to help you understand how to structure your content?`;
-    }
-    
-    if (lowerMessage.includes('did') || lowerMessage.includes('canister')) {
-      if (record.addressType === AddressType.canister) {
-        return `Since ${nameRecord} is a canister address, you can manage its DID (Candid interface definition) file. This helps with service discovery and integration. The DID file describes the canister's public interface and available methods.`;
-      } else {
-        return `${nameRecord} is registered as an identity address, so DID file management is not available. DID files are only used for canister addresses to describe their public interfaces.`;
-      }
-    }
-    
-    if (lowerMessage.includes('help') || lowerMessage.includes('what can you do')) {
-      return `I can help you with:
-• Understanding your name's settings and profile information
-• Explaining how to use the markdown content editor
-• Providing guidance on DID files (for canisters)
-• Answering questions about your name registration
-• Helping you make the most of your IcpHub membership
 
-What would you like to explore?`;
+    if (stage === 'init') {
+      if (lowerMessage.includes('who are you') || lowerMessage.includes('who r u')) {
+        return alexProfile.mediumIntro;
+      } else {
+        return `Please ask "Who are you?" to continue the identity simulation.`;
+      }
+    } else if (stage === 'identity') {
+      if (lowerMessage.includes('where are you from') || lowerMessage.includes('where r u from')) {
+        return alexProfile.fromResponse;
+      } else {
+        return `Please ask "Where are you from?" to continue.`;
+      }
+    } else if (stage === 'location') {
+      return `✅ Simulation complete! This demonstrates how Context Protocol enables AI-native identity verification. Each canister can have its own MCP server for trusted interactions.`;
+    } else if (stage === 'done') {
+      return `The simulation has ended. Refresh the chat to start over.`;
     }
-    
-    if (lowerMessage.includes('season') || lowerMessage.includes('registration')) {
-      return `Your name ${nameRecord} was registered during a specific season. Each season has its own parameters and pricing. Your registration gives you access to Context Protocol services and this AI interface for managing your name's content and metadata.`;
-    }
-    
-    // Default responses
-    const defaultResponses = [
-      `That's an interesting question about ${nameRecord}. Based on the current content and metadata, I can help you explore different aspects of your name registration. Could you be more specific about what you'd like to know?`,
-      `I'm here to help you with ${nameRecord}. You can ask me about settings management, content editing, or how to make the most of your name registration. What would you like to focus on?`,
-      `As the AI for ${nameRecord}, I can assist with various aspects of your name management. Whether it's about settings, content, or general usage, I'm here to assist. What specific area interests you most?`,
-      `Thanks for your question! I'm designed to help you understand and manage ${nameRecord}. Whether it's about settings, content, or general usage, I'm here to assist. What specific area would you like to explore?`
-    ];
-    
-    return defaultResponses[Math.floor(Math.random() * defaultResponses.length)];
+
+    return `🤖 Please follow the simulation prompts.`;
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -699,10 +721,14 @@ What would you like to explore?`;
                 <div className="flex items-center justify-between">
                   <h4 className="text-sm font-medium flex items-center space-x-2">
                     <MessageCircle className="h-4 w-4" />
-                    <span>Chat with {record.name} AI</span>
+                    <span>
+                      {isCryptobenkei
+                        ? `Identity Simulation: ${record.name}`
+                        : `Chat with ${record.name} AI`}
+                    </span>
                   </h4>
                   <Badge variant="secondary" className="text-xs">
-                    Simulation
+                    {isCryptobenkei ? 'Identity Demo' : 'Coming Soon'}
                   </Badge>
                 </div>
                 
@@ -774,7 +800,9 @@ What would you like to explore?`;
                 </div>
                 
                 <div className="text-xs text-muted-foreground">
-                  This is a simulated AI chat interface. The AI can help you understand your name's features, settings, and content management options.
+                  {isCryptobenkei
+                    ? 'Interactive identity simulation demonstrating Context Protocol\'s verified AI-native identity system.'
+                    : 'This is a simulated AI chat interface. The AI can help you understand your name\'s features, settings, and content management options.'}
                 </div>
               </div>
             </TabsContent>
