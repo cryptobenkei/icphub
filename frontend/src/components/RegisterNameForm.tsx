@@ -96,15 +96,34 @@ export function RegisterNameForm() {
   }
 
   if (hasRegisteredName) {
+    const handleGoToSettings = () => {
+      // Dispatch event to switch to My Names tab
+      const event = new CustomEvent('switchTab', { detail: 'my-name' });
+      window.dispatchEvent(event);
+    };
+
     return (
-      <Card>
-        <CardContent className="text-center py-8">
-          <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Name Already Registered</h3>
-          <p className="text-muted-foreground">
-            You have already registered a name: <strong>{userNames[0]?.name}</strong>.
-            Each principal can only register one name globally.
-          </p>
+      <Card className="mt-8">
+        <CardContent className="text-center py-12 px-8">
+          <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-6" />
+          <h3 className="text-2xl font-bold mb-4">You Already Have a Registered Name</h3>
+          <div className="max-w-md mx-auto space-y-4">
+            <p className="text-muted-foreground text-lg">
+              You own the name <strong className="text-primary">@{userNames[0]?.name}.icp</strong>
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Each principal can only register one name globally. You can manage your existing name in the settings.
+            </p>
+            <div className="pt-4">
+              <Button
+                onClick={handleGoToSettings}
+                size="lg"
+                className="w-full sm:w-auto"
+              >
+                Go to Name Settings
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     );
