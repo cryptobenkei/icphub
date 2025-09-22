@@ -30,10 +30,10 @@ canister_ids.json
 *.tsbuildinfo
 dist/
 
-# Generated declarations
-src/declarations/
-registry/src/declarations/
-frontend/src/declarations/
+# Generated declarations (commented out to include them for easier setup)
+# src/declarations/
+# registry/src/declarations/
+# frontend/src/declarations/
 
 # Backup files
 backups/
