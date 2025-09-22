@@ -15,7 +15,11 @@ class ICPHubCLI {
   }
 
   async init() {
-    await this.manager.init(undefined, "http://localhost:4943");
+    // Determine host based on DFX_NETWORK environment variable
+    const network = process.env.DFX_NETWORK || 'local';
+    const host = network === 'ic' ? 'https://ic0.app' : 'http://localhost:4943';
+
+    await this.manager.init(undefined, host);
   }
 
   async status() {
@@ -59,6 +63,11 @@ class ICPHubCLI {
       const isDfxAdmin = allAdmins.some(admin => admin.toString() === dfxPrincipal);
       const dfxRole = isDfxAdmin ? 'admin' : 'user';
 
+      const network = process.env.DFX_NETWORK || 'local';
+      const networkIcon = network === 'ic' ? '🌐' : '🏠';
+      const networkName = network === 'ic' ? 'Internet Computer' : 'Local Development';
+
+      console.log(`${networkIcon} Network: ${networkName} (${network})`);
       console.log(`📍 Canister ID: ${canisterId}`);
       console.log(`🏷️  Version: ${version.major}.${version.minor}.${version.patch}`);
       console.log(`🕐 Current Time: ${new Date(Number(currentTime) / 1000000).toISOString()}`);

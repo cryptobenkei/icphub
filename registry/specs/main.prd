@@ -5,7 +5,9 @@
 
 3. The admin creates a new season. Only admin.
 4. The admin activates a season.
-- From this moemnt users can buy a name in the season with ñthe season limitations.
+- From this moemnt users can buy a name in the season within the season limitations.
+- A use will register a name. And will send the desired amount of ICP tokens in taht call.
+- The canister will verify the payment and will create a one year subscription
 
 5. The user that has control (owner) of the name can 
 - Edit the settings. It's the metadata document.

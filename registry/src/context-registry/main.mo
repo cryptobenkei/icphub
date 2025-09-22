@@ -102,6 +102,7 @@ persistent actor {
 
   public type Subscription = {
     user : Principal;
+    registeredName : Text;
     subscriptionType : SubscriptionType;
     startTime : Int;
     endTime : Int;
@@ -353,10 +354,32 @@ persistent actor {
     Debug.trap("No active season found");
   };
 
-  public shared ({ caller }) func registerName(name : Text, address : Text, addressType : AddressType, owner : Text, seasonId : Nat) : async () {
+  // Helper function to check if a principal already has any registered name
+  private func principalHasRegisteredName(principalId : Principal) : Bool {
+    let principalText = Principal.toText(principalId);
+    for (record in textMap.vals(nameRecords)) {
+      if (record.owner == principalText) {
+        return true;
+      };
+    };
+    false;
+  };
+
+  public shared ({ caller }) func registerName(name : Text, address : Text, addressType : AddressType, owner : Text, seasonId : Nat) : async Nat {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Debug.trap("Unauthorized: Only users can register names");
     };
+
+    // Check if caller already has a registered name (one name per principal rule)
+    if (principalHasRegisteredName(caller)) {
+      Debug.trap("Principal already has a registered name. Only one name per principal is allowed");
+    };
+
+    // Verify caller matches owner
+    if (Principal.toText(caller) != owner) {
+      Debug.trap("Caller must match the owner principal");
+    };
+
     switch (natMap.get(seasons, seasonId)) {
       case null { Debug.trap("Season not found") };
       case (?season) {
@@ -371,6 +394,14 @@ persistent actor {
         if (nameLength < season.minNameLength or nameLength > season.maxNameLength) {
           Debug.trap("Name length does not meet season requirements");
         };
+
+        // Check if name is already registered
+        switch (textMap.get(nameRecords, name)) {
+          case (?_) { Debug.trap("Name already registered") };
+          case null {};
+        };
+
+        // Check season capacity
         var registrationCount = 0;
         for (record in textMap.vals(nameRecords)) {
           if (record.seasonId == seasonId) {
@@ -380,26 +411,65 @@ persistent actor {
         if (registrationCount >= season.maxNames) {
           Debug.trap("Season has reached its maximum number of registrations");
         };
-        for (record in textMap.vals(nameRecords)) {
-          if (record.owner == owner and record.seasonId == seasonId) {
-            Debug.trap("Owner has already registered a name in this season");
-          };
+
+        // Process ICP payment
+        let requiredAmount = season.price;
+
+        // For ICP payments, we need to verify the payment was sent to this canister
+        // This is a simplified approach - in production, you'd integrate with ICP ledger
+        // to verify actual transfers. For now, we'll use a placeholder that can be
+        // called with the payment amount as a parameter.
+
+        // TODO: Integrate with ICP Ledger canister to verify actual ICP transfers
+        // For now, assuming payment verification happens off-chain or via separate call
+
+        // Update ICP balance (this would come from verified ledger transfer)
+        icpBalance += requiredAmount;
+
+        // Create payment record
+        let payment : Payment = {
+          id = nextPaymentId;
+          payer = caller;
+          amount = requiredAmount; // ICP amount paid
+          subscriptionType = #basic; // Default to basic for name registration
+          status = #completed;
+          txHash = null;
+          createdAt = now;
+          updatedAt = now;
         };
-        switch (textMap.get(nameRecords, name)) {
-          case (?_) { Debug.trap("Name already registered") };
-          case null {
-            let record : NameRecord = {
-              name;
-              address;
-              addressType;
-              owner;
-              seasonId;
-              createdAt = Time.now();
-              updatedAt = Time.now();
-            };
-            nameRecords := textMap.put(nameRecords, name, record);
-          };
+
+        payments := natMap.put(payments, nextPaymentId, payment);
+        let paymentId = nextPaymentId;
+        nextPaymentId += 1;
+
+        // Create name record
+        let record : NameRecord = {
+          name;
+          address;
+          addressType;
+          owner;
+          seasonId;
+          createdAt = now;
+          updatedAt = now;
         };
+        nameRecords := textMap.put(nameRecords, name, record);
+
+        // Create 1-year subscription
+        let subscriptionDuration = 365 * 24 * 60 * 60 * 1_000_000_000; // 1 year in nanoseconds
+        let subscription : Subscription = {
+          user = caller;
+          registeredName = name;
+          subscriptionType = #basic;
+          startTime = now;
+          endTime = now + subscriptionDuration;
+          paymentId = paymentId;
+          isActive = true;
+          createdAt = now;
+        };
+
+        subscriptions := principalMap.put(subscriptions, caller, subscription);
+
+        paymentId;
       };
     };
   };
@@ -703,64 +773,6 @@ persistent actor {
   // PAYMENT AND SUBSCRIPTION FUNCTIONS
   // =============================================================================
 
-  // Subscription pricing in e8s (1 ICP = 100_000_000 e8s)
-  private func getSubscriptionPrice(subscriptionType : SubscriptionType) : Nat {
-    switch (subscriptionType) {
-      case (#basic) { 100_000_000 }; // 1 ICP
-      case (#premium) { 500_000_000 }; // 5 ICP
-      case (#enterprise) { 1_000_000_000 }; // 10 ICP
-    };
-  };
-
-  // Accept ICP payment for subscription
-  public shared ({ caller }) func receivePayment(subscriptionType : SubscriptionType) : async Nat {
-    if (Principal.isAnonymous(caller)) {
-      Debug.trap("Anonymous callers cannot make payments");
-    };
-
-    let expectedAmount = getSubscriptionPrice(subscriptionType);
-    let receivedCycles = ExperimentalCycles.available();
-    let _receivedAmount = receivedCycles; // For now, using cycles as proxy
-
-    // Create payment record
-    let payment : Payment = {
-      id = nextPaymentId;
-      payer = caller;
-      amount = expectedAmount;
-      subscriptionType = subscriptionType;
-      status = #completed;
-      txHash = null; // Could be populated from transaction data
-      createdAt = Time.now();
-      updatedAt = Time.now();
-    };
-
-    // Store payment
-    payments := natMap.put(payments, nextPaymentId, payment);
-    let paymentId = nextPaymentId;
-    nextPaymentId += 1;
-
-    // Update ICP balance
-    icpBalance += expectedAmount;
-
-    // Create or update subscription
-    let subscriptionDuration = 30 * 24 * 60 * 60 * 1_000_000_000; // 30 days in nanoseconds
-    let subscription : Subscription = {
-      user = caller;
-      subscriptionType = subscriptionType;
-      startTime = Time.now();
-      endTime = Time.now() + subscriptionDuration;
-      paymentId = paymentId;
-      isActive = true;
-      createdAt = Time.now();
-    };
-
-    subscriptions := principalMap.put(subscriptions, caller, subscription);
-
-    // Accept the cycles
-    ignore ExperimentalCycles.accept<system>(receivedCycles);
-
-    paymentId;
-  };
 
   // Get subscription status for a user
   public query func getUserSubscription(user : Principal) : async ?Subscription {
@@ -815,8 +827,12 @@ persistent actor {
       return #err("Cannot transfer to anonymous principal");
     };
 
-    // In a real implementation, you would integrate with ICP Ledger canister
-    // For now, we'll simulate the transfer by updating internal balance
+    // TODO: In production, integrate with ICP Ledger canister:
+    // 1. Create transfer request to ICP Ledger
+    // 2. Handle transfer result and update balance accordingly
+    // Example: let transferResult = await ICPLedger.transfer({to, amount, fee});
+
+    // For now, simulate the transfer by updating internal balance
     icpBalance -= amount;
 
     // Log the withdrawal for audit purposes
@@ -824,6 +840,30 @@ persistent actor {
 
     // Return success with a mock transaction ID
     #ok(amount);
+  };
+
+  // Function to verify ICP payment was received (to be called after payment)
+  public shared ({ caller }) func verifyPayment(txHash : Text, amount : Nat, payer : Principal) : async Bool {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Debug.trap("Unauthorized: Only users can verify payments");
+    };
+
+    // TODO: Integrate with ICP Ledger canister to verify the transaction
+    // 1. Query ICP Ledger for transaction by hash
+    // 2. Verify amount and sender match
+    // 3. Verify transaction was sent to this canister
+    // Example: let tx = await ICPLedger.getTransaction(txHash);
+
+    // For now, return true (placeholder)
+    // In production, this would verify the actual blockchain transaction
+    true;
+  };
+
+  // Get canister's ICP account address (for receiving payments)
+  public query func getCanisterIcpAddress() : async Text {
+    // TODO: In production, derive actual ICP account address from canister principal
+    // For now, return placeholder
+    "placeholder-icp-address";
   };
 
   // Emergency function to pause all subscriptions (admin only)

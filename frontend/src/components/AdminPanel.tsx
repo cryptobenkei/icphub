@@ -724,7 +724,7 @@ function SeasonRow({ season, hasActiveSeason }: { season: Season; hasActiveSeaso
       </TableCell>
       <TableCell>
         <div className="text-sm">
-          {season.price.toString()} ICP
+          {(Number(season.price) / 100_000_000).toFixed(2)} ICP
         </div>
       </TableCell>
       <TableCell>

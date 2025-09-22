@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Globe, User, Save, FileText, Code, MessageCircle, Send, Bot, Edit, X, Eye } from 'lucide-react';
+import { Globe, User, Save, FileText, Code, MessageCircle, Send, Bot, Edit, X, Eye, UserPlus } from 'lucide-react';
 import { 
   useGetUserNames, 
   useGetNameMetadata, 
@@ -19,6 +19,11 @@ import {
 } from '../hooks/useQueries';
 import { AddressType } from '../backend';
 import { toast } from 'sonner';
+import { useInternetIdentity } from '../hooks/useInternetIdentity';
+import { useActor } from '../hooks/useActor';
+
+// Whitelist configuration
+const ADMIN_WHITELIST = ['cryptobenkei'];
 
 interface ChatMessage {
   id: string;
@@ -57,11 +62,75 @@ function NameManagement({ record }: { record: any }) {
   const { data: metadata, isLoading: metadataLoading } = useGetNameMetadata(record.name);
   const { data: markdownData, isLoading: markdownLoading } = useGetNameMarkdown(record.name);
   const { data: didContent } = useGetNameDid(record.name);
-  
+
   // Mutations
   const saveMetadataMutation = useSaveNameMetadata();
   const saveMarkdownMutation = useSaveNameMarkdown();
   const saveDidMutation = useSaveNameDid();
+
+  // Admin registration logic
+  const { identity } = useInternetIdentity();
+  const { actor } = useActor();
+  const [isRegisteringForAdmin, setIsRegisteringForAdmin] = useState(false);
+
+  // Check if this name is in the admin whitelist
+  const isWhitelisted = ADMIN_WHITELIST.includes(record.name);
+  console.log('🔍 Whitelist check:', {
+    recordName: record.name,
+    whitelist: ADMIN_WHITELIST,
+    isWhitelisted: isWhitelisted
+  });
+
+  // Check if user is authenticated
+  const isAuthenticated = !!identity && !identity.getPrincipal().isAnonymous();
+  console.log('🔍 Authentication check:', {
+    identity: identity ? 'present' : 'null',
+    principal: identity?.getPrincipal().toString() || 'none',
+    isAuthenticated: isAuthenticated
+  });
+
+  const handleRegisterForAdmin = async () => {
+    console.log('🔵 Register for Admin button clicked');
+    console.log('🔵 isAuthenticated:', isAuthenticated);
+    console.log('🔵 identity:', identity);
+    console.log('🔵 actor:', actor);
+
+    if (identity) {
+      const principal = identity.getPrincipal();
+      console.log('🔵 Current principal:', principal.toString());
+      console.log('🔵 Principal isAnonymous:', principal.isAnonymous());
+    }
+
+    if (!isAuthenticated || !actor) {
+      console.log('🔴 Authentication failed - not authenticated or no actor');
+      toast.error('Please authenticate first');
+      return;
+    }
+
+    try {
+      setIsRegisteringForAdmin(true);
+      console.log('🔵 Calling initializeAccessControl...');
+
+      // Call initializeAccessControl to register the user in the system
+      const result = await actor.initializeAccessControl();
+      console.log('🟢 initializeAccessControl result:', result);
+
+      toast.success(`Successfully registered ${record.name} owner for admin eligibility. An existing admin can now promote this user.`);
+      console.log('🟢 Registration successful for principal:', identity?.getPrincipal().toString());
+
+    } catch (error) {
+      console.error('🔴 Registration error:', error);
+      console.log('🔴 Error details:', {
+        message: error.message,
+        name: error.name,
+        stack: error.stack
+      });
+      toast.error('Failed to register for admin eligibility. You may already be registered.');
+    } finally {
+      setIsRegisteringForAdmin(false);
+      console.log('🔵 Registration process completed');
+    }
+  };
 
   // Local state for the new metadata fields
   const [name, setName] = useState('');
@@ -575,20 +644,39 @@ What would you like to explore?`;
       {/* Basic Name Information */}
       <Card className="mt-8 bg-primary text-white border-primary">
         <CardContent className="pt-6">
-          <div className="flex items-center space-x-2">
-            <div className="p-2 bg-white/10 rounded-lg">
-              {record.addressType === AddressType.canister ? (
-                <Globe className="h-4 w-4 text-white" />
-              ) : (
-                <User className="h-4 w-4 text-white" />
-              )}
-            </div>
-            <div>
-              <span className="font-semibold text-white">@{record.name}.icp</span>
-              <div className="text-sm text-white/80 font-mono">
-                {record.address}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <div className="p-2 bg-white/10 rounded-lg">
+                {record.addressType === AddressType.canister ? (
+                  <Globe className="h-4 w-4 text-white" />
+                ) : (
+                  <User className="h-4 w-4 text-white" />
+                )}
+              </div>
+              <div>
+                <span className="font-semibold text-white">@{record.name}.icp</span>
+                <div className="text-sm text-white/80 font-mono">
+                  {record.address}
+                </div>
+                {isWhitelisted && (
+                  <div className="text-xs text-white/90 mt-1">
+                    ✓ Eligible for admin privileges
+                  </div>
+                )}
               </div>
             </div>
+            {isWhitelisted && isAuthenticated && (
+              <Button
+                onClick={handleRegisterForAdmin}
+                disabled={isRegisteringForAdmin}
+                variant="outline"
+                size="xs"
+                className="text-xs text-gray-400 border-white/30 hover:bg-white/10 hover:text-gray-300 px-3 py-1"
+              >
+                <UserPlus className="h-3 w-3 mr-1" />
+                {isRegisteringForAdmin ? 'Registering...' : 'Register for Admin'}
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>

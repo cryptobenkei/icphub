@@ -82,12 +82,12 @@ export function Home() {
               <p className="text-sm text-muted-foreground">Interact with any canister using DID files through our AI chat interface</p>
             </div>
           </div>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button className="bg-primary text-primary-foreground px-6 py-3 rounded-lg font-semibold hover:bg-primary/90 transition-colors">
+          <div className="flex justify-center">
+            <button
+              onClick={handleRegisterName}
+              className="bg-primary text-primary-foreground px-6 py-3 rounded-lg font-semibold hover:bg-primary/90 transition-colors"
+            >
               Register Your Name
-            </button>
-            <button className="bg-secondary text-white px-6 py-3 rounded-lg font-semibold hover:bg-secondary/90 transition-colors">
-              Talk to the Community
             </button>
           </div>
         </div>
@@ -123,7 +123,7 @@ export function Home() {
                 <div className="w-px h-8 bg-border"></div>
                 <div className="text-center">
                   <div className="text-xl font-bold text-secondary mb-1">
-                    {seasonInfo.price.toString()} ICP
+                    {(Number(seasonInfo.price) / 100_000_000).toFixed(2)} ICP
                   </div>
                   <p className="text-xs text-muted-foreground">Subscription Price</p>
                 </div>

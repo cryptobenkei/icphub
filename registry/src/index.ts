@@ -212,8 +212,10 @@ async function main() {
   const manager = new ContextRegistryManager();
 
   try {
-    // Initialize with local development setup
-    await manager.init(undefined, "http://localhost:4943");
+    // Initialize with environment-based setup
+    const network = process.env.DFX_NETWORK || 'local';
+    const host = network === 'ic' ? 'https://ic0.app' : 'http://localhost:4943';
+    await manager.init(undefined, host);
 
     switch (command) {
       case "init":
