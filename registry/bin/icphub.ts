@@ -123,7 +123,7 @@ class ICPHubCLI {
   async printStandardHeader(command: string) {
     console.log(`\x1b[1m\x1b[34mICPHub\x1b[0m \x1b[90m1.0.0\x1b[0m ${command}`);
 
-    const envColor = this.currentEnv === 'production' ? '\x1b[34m' : '\x1b[33m'; // Blue for production, Yellow for local
+    const envColor = this.currentEnv === 'production' ? '\x1b[35m' : '\x1b[33m'; // Purple for production, Yellow for local
     const envName = this.currentEnv === 'production' ? 'Production' : 'Local';
     const canisterId = this.currentEnv === 'production' ? 'gpddv-xaaaa-aaaai-atlua-cai' : process.env.CANISTER_ID_CONTEXT_REGISTRY;
 
@@ -193,19 +193,42 @@ class ICPHubCLI {
       console.log(`\x1b[34mTotal names:\x1b[0m ${nameRecords.length}`);
       console.log(`\x1b[34mTotal Documents:\x1b[0m ${fileReferences.length}`);
 
-      // Get treasury balances
+      // Get treasury balances using direct dfx calls (more reliable than TypeScript client)
       try {
-        const icpBalance = await actor.getIcpBalance();
-        const cyclesBalance = await actor.getCyclesBalance();
+        const { spawn } = await import('child_process');
+        const network = this.currentEnv === 'production' ? 'ic' : 'local';
 
-        // Convert ICP balance from e8s to ICP
-        const icpBalanceFormatted = (Number(icpBalance) / 100_000_000).toFixed(8);
+        // Get ICP balance
+        const icpProcess = spawn('dfx', ['canister', '--network', network, 'call', 'context_registry', 'getIcpBalance', '--query'], { stdio: 'pipe' });
+        let icpOutput = '';
+        icpProcess.stdout?.on('data', (data) => {
+          icpOutput += data.toString();
+        });
 
-        // Convert cycles to a readable format
-        const cyclesBalanceFormatted = (Number(cyclesBalance) / 1_000_000_000_000).toFixed(2);
+        await new Promise((resolve) => {
+          icpProcess.on('close', () => resolve(0));
+        });
 
-        console.log(`\x1b[34mTreasury:\x1b[0m ${icpBalanceFormatted} ICP`);
-        console.log(`\x1b[34mCycles:\x1b[0m ${cyclesBalanceFormatted}T cycles`);
+        // Get cycles balance
+        const cyclesProcess = spawn('dfx', ['canister', '--network', network, 'call', 'context_registry', 'getCyclesBalance', '--query'], { stdio: 'pipe' });
+        let cyclesOutput = '';
+        cyclesProcess.stdout?.on('data', (data) => {
+          cyclesOutput += data.toString();
+        });
+
+        await new Promise((resolve) => {
+          cyclesProcess.on('close', () => resolve(0));
+        });
+
+        // Parse and format outputs
+        const icpBalance = icpOutput.match(/\((\d+(?:_\d+)*)\s*:\s*nat\)/)?.[1]?.replace(/_/g, '') || '0';
+        const cyclesBalance = cyclesOutput.match(/\((\d+(?:_\d+)*)\s*:\s*nat\)/)?.[1]?.replace(/_/g, '') || '0';
+
+        const icpFormatted = (parseInt(icpBalance) / 100_000_000).toFixed(8);
+        const cyclesFormatted = (parseInt(cyclesBalance) / 1_000_000_000_000).toFixed(2);
+
+        console.log(`\x1b[34mTreasury:\x1b[0m ${icpFormatted} ICP`);
+        console.log(`\x1b[34mCycles:\x1b[0m ${cyclesFormatted}T cycles`);
       } catch (error) {
         console.log(`\x1b[34mTreasury:\x1b[0m Unable to fetch`);
         console.log(`\x1b[34mCycles:\x1b[0m Unable to fetch`);
@@ -1058,6 +1081,131 @@ class ICPHubCLI {
     }
   }
 
+  async initAdmins() {
+    await this.printStandardHeader("admins init");
+
+    try {
+      // First, switch to mainnet-secure identity
+      const { spawn } = await import('child_process');
+
+      console.log("🔑 Switching to mainnet-secure identity...");
+      const switchProcess = spawn('dfx', ['identity', 'use', 'mainnet-secure'], { stdio: 'pipe' });
+
+      let switchOutput = '';
+      switchProcess.stderr?.on('data', (data) => {
+        switchOutput += data.toString();
+      });
+
+      await new Promise((resolve, reject) => {
+        switchProcess.on('close', (code) => {
+          if (code === 0) {
+            resolve(code);
+          } else {
+            reject(new Error(`Failed to switch to mainnet-secure identity: ${switchOutput}`));
+          }
+        });
+      });
+
+      // Get the principal of mainnet-secure identity
+      const principalProcess = spawn('dfx', ['identity', 'get-principal'], { stdio: 'pipe' });
+      let principalOutput = '';
+
+      principalProcess.stdout?.on('data', (data) => {
+        principalOutput += data.toString();
+      });
+
+      await new Promise((resolve, reject) => {
+        principalProcess.on('close', (code) => {
+          if (code === 0) resolve(code);
+          else reject(new Error(`Failed to get principal for mainnet-secure identity`));
+        });
+      });
+
+      const mainnetSecurePrincipal = principalOutput.trim();
+      console.log(`✅ Switched to mainnet-secure identity`);
+      console.log(`🆔 Principal: ${mainnetSecurePrincipal}`);
+
+      // Initialize access control to make this identity the first admin
+      const network = this.currentEnv === 'production' ? 'ic' : 'local';
+      console.log(`\n🚀 Initializing access control system...`);
+
+      const initArgs = [
+        'canister',
+        '--network',
+        network,
+        'call',
+        'context_registry',
+        'initializeAccessControl'
+      ];
+
+      const initProcess = spawn('dfx', initArgs, { stdio: 'pipe' });
+
+      let initOutput = '';
+      initProcess.stdout?.on('data', (data) => {
+        initOutput += data.toString();
+      });
+      initProcess.stderr?.on('data', (data) => {
+        initOutput += data.toString();
+      });
+
+      await new Promise((resolve, reject) => {
+        initProcess.on('close', (code) => {
+          if (code === 0) {
+            console.log(`✅ Access control initialized successfully`);
+            console.log(`👑 ${mainnetSecurePrincipal} is now the primary admin`);
+            resolve(code);
+          } else {
+            if (initOutput.includes('already initialized') || initOutput.includes('Access control')) {
+              console.log(`⚠️  Access control already initialized`);
+              console.log(`   Current admin status will be checked...`);
+              resolve(code);
+            } else {
+              console.log(`❌ Failed to initialize access control`);
+              console.log(`   Error: ${initOutput}`);
+              reject(new Error(`dfx command failed with code ${code}: ${initOutput}`));
+            }
+          }
+        });
+      });
+
+      // Verify admin status
+      try {
+        await this.init(); // Re-initialize manager with current identity
+        const actor = this.manager.getActor();
+        if (actor) {
+          const allAdmins = await actor.getAllAdmins();
+          const isAdmin = allAdmins.some(admin => admin.toString() === mainnetSecurePrincipal);
+
+          console.log(`\n📊 Final Status:`);
+          console.log(`   Identity: mainnet-secure`);
+          console.log(`   Principal: ${mainnetSecurePrincipal}`);
+          console.log(`   Admin Status: ${isAdmin ? '✅ ADMIN' : '❌ NOT ADMIN'}`);
+          console.log(`   Total Admins: ${allAdmins.length}`);
+
+          if (isAdmin) {
+            console.log(`\n🎉 Successfully initialized! You can now manage the canister with admin privileges.`);
+            console.log(`💡 Use 'icphub admins' to see all admins`);
+            console.log(`💡 Use 'icphub status' to check canister status`);
+          } else if (allAdmins.length > 0) {
+            console.log(`\n⚠️  Access control was already initialized by another identity.`);
+            console.log(`   Current admin(s):`);
+            allAdmins.forEach(admin => console.log(`     ${admin.toString()}`));
+          }
+        }
+      } catch (error) {
+        console.log(`\n⚠️  Could not verify admin status: ${error}`);
+        console.log(`   Use 'icphub admins' to check current admin status`);
+      }
+
+    } catch (error) {
+      console.log(`❌ Error during admin initialization:`, (error as Error).message || error);
+      console.log(`\n💡 Troubleshooting tips:`);
+      console.log(`   1. Make sure you have a 'mainnet-secure' identity: dfx identity list`);
+      console.log(`   2. Create it if needed: dfx identity new mainnet-secure`);
+      console.log(`   3. Ensure you have access to the canister in the current environment`);
+    }
+  }
+
   async listAdmins() {
     await this.printStandardHeader("admins");
 
@@ -1432,6 +1580,32 @@ class ICPHubCLI {
 
     const envName = this.currentEnv === 'production' ? 'production' : 'local';
 
+    // Special handling for production environment
+    if (this.currentEnv === 'production') {
+      console.log("🚨 PRODUCTION DEPLOYMENT WARNING");
+      console.log("================================");
+      console.log("");
+      console.log("⚠️  You are about to deploy to PRODUCTION environment!");
+      console.log("⚠️  This 'deploy fresh' command is NOT safe for production as it:");
+      console.log("   • Creates a NEW canister (losing existing canister ID and cycles)");
+      console.log("   • Deletes ALL existing data permanently");
+      console.log("");
+      console.log("🔒 SAFE PRODUCTION DEPLOYMENT OPTIONS:");
+      console.log("");
+      console.log("1️⃣  UPGRADE (preserves data & cycles):");
+      console.log("   dfx deploy context_registry --mode upgrade --network ic --identity mainnet-secure");
+      console.log("");
+      console.log("2️⃣  REINSTALL (preserves cycles, deletes data):");
+      console.log("   dfx deploy context_registry --mode reinstall --network ic --identity mainnet-secure");
+      console.log("");
+      console.log("💡 Your production canister ID: gpddv-xaaaa-aaaai-atlua-cai");
+      console.log("💰 Current cycles: ~3T (preserved with both options above)");
+      console.log("");
+      console.log("❌ REFUSING to run 'deploy fresh' in production for safety.");
+      console.log("   Use local environment for fresh deployments: icphub env local");
+      return;
+    }
+
     console.log("⚠️  This will DELETE ALL DATA and deploy a fresh canister.");
     console.log(`\x1b[1m\x1b[33mTo continue write "${envName}"\x1b[0m`);
 
@@ -1574,6 +1748,7 @@ class ICPHubCLI {
     console.log(``);
     console.log(`👑 Admin Management:`);
     console.log(`  icphub admins                    List all admins`);
+    console.log(`  icphub admins init               Switch to mainnet-secure identity and initialize as first admin`);
     console.log(`  icphub admins add                Add new admin (interactive prompt)`);
     console.log(`  icphub admins remove             Remove admin (interactive prompt)`);
     console.log(``);
@@ -1594,6 +1769,7 @@ class ICPHubCLI {
     console.log(`  icphub seasons add "Spring 2025" "01/03/2025 09:00" "31/05/2025 18:00" 100 3 20 1000000`);
     console.log(`  icphub seasons activate 1`);
     console.log(`  icphub admins`);
+    console.log(`  icphub admins init`);
     console.log(`  icphub admins add`);
     console.log(`  icphub admins remove`);
     console.log(`  icphub name "testname"`);
@@ -1726,13 +1902,15 @@ async function main() {
       case "admins":
         if (!subcommand) {
           await cli.listAdmins();
+        } else if (subcommand === "init") {
+          await cli.initAdmins();
         } else if (subcommand === "add") {
           await cli.addAdmin();
         } else if (subcommand === "remove") {
           await cli.removeAdmin();
         } else {
           console.error(`❌ Unknown admins subcommand: ${subcommand}`);
-          console.error('   Available commands: add, remove');
+          console.error('   Available commands: init, add, remove');
           await cli.showHelp();
         }
         break;

@@ -589,6 +589,9 @@ persistent actor Self {
         // Mark block index as used to prevent replay attacks
         markBlockIndexUsed(blockIndex);
 
+        // Update ICP balance when payment is successfully verified
+        icpBalance += requiredAmount;
+
         // Create verified payment record
         let verifiedPayment : VerifiedPayment = {
           id = nextVerifiedPaymentId;
