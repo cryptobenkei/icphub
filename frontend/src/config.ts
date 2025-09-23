@@ -11,7 +11,6 @@ interface EnvironmentConfig {
 }
 
 interface JsonConfig {
-    local: EnvironmentConfig;
     production: EnvironmentConfig;
 }
 
@@ -25,7 +24,7 @@ interface Config {
 
 let configCache: Config | null = null;
 
-function detectEnvironment(): 'local' | 'production' {
+function detectEnvironment(): 'production' {
     return 'production';
 }
 
@@ -36,12 +35,11 @@ export async function loadConfig(): Promise<Config> {
     try {
         const response = await fetch('./env.json');
         const allConfigs = (await response.json()) as JsonConfig;
-        const environment = detectEnvironment();
-        const envConfig = allConfigs[environment];
+        const envConfig = allConfigs.production;
 
         const fullConfig = {
-            backend_host: envConfig.backend_host == 'undefined' ? undefined : envConfig.backend_host,
-            backend_canister_id: envConfig.backend_canister_id == 'undefined' ? canisterId : envConfig.backend_canister_id,
+            backend_host: envConfig.backend_host === 'undefined' ? 'https://ic0.app' : envConfig.backend_host,
+            backend_canister_id: envConfig.backend_canister_id === 'undefined' ? canisterId : envConfig.backend_canister_id,
             storage_gateway_url: process.env.STORAGE_GATEWAY_URL ?? 'nogateway',
             bucket_name: DEFAULT_BUCKET_NAME,
             project_id: envConfig.project_id && envConfig.project_id !== 'undefined' ? envConfig.project_id : DEFAULT_PROJECT_ID
@@ -50,7 +48,7 @@ export async function loadConfig(): Promise<Config> {
         return fullConfig;
     } catch {
         const fallbackConfig = {
-            backend_host: undefined,
+            backend_host: 'https://ic0.app',
             backend_canister_id: canisterId,
             storage_gateway_url: DEFAULT_STORAGE_GATEWAY_URL,
             bucket_name: DEFAULT_BUCKET_NAME,
@@ -96,6 +94,6 @@ export async function getWhitelistForPlug(): Promise<string[]> {
 
 export async function getHostForPlug(): Promise<string> {
     const config = await loadConfig();
-    return config.backend_host || 'https://mainnet.dfinity.network';
+    return config.backend_host || 'https://ic0.app';
 }
 

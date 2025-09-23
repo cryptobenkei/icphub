@@ -14,6 +14,8 @@ import Result "mo:base/Result";
 import Blob "mo:base/Blob";
 import ExperimentalCycles "mo:base/ExperimentalCycles";
 import Set "mo:base/HashMap";
+import SHA224 "mo:sha224/SHA224";
+import CRC32 "mo:crc32/CRC32";
 
 // Enhanced Orthogonal Persistence Actor - Safe Migration Pattern
 persistent actor Self {

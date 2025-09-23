@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Globe, User, Calendar, AlertCircle, CheckCircle, Coins, Clock } from 'lucide-react';
-import { useRegisterName, useGetActiveSeason, useGetUserNames, useGetActiveSeasonInfo, usePaymentVerificationAndRegister, useGetCanisterPrincipal, useGetICPBalance } from '../hooks/useQueries';
+import { useRegisterName, useGetActiveSeason, useGetUserNames, useGetActiveSeasonInfo, usePaymentVerificationAndRegister, useGetCanisterPrincipal } from '../hooks/useQueries';
 import { usePlugWallet } from '../hooks/usePlugWallet';
 import { AddressType } from '../backend';
 import { Principal } from '@dfinity/principal';
@@ -72,7 +72,6 @@ export function RegisterNameForm() {
   const { data: activeSeasonInfo } = useGetActiveSeasonInfo();
   const { data: userNames } = useGetUserNames();
   const { data: canisterPrincipal } = useGetCanisterPrincipal();
-  const { data: icpBalance, isLoading: balanceLoading } = useGetICPBalance();
   const addressType = watch('addressType');
 
   // Check if user already has any registered name (one name per principal globally)
@@ -175,49 +174,55 @@ export function RegisterNameForm() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Season Info */}
-      <Card className="mt-8 bg-primary text-white border-primary">
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2 text-white">
-            <Calendar className="h-5 w-5" />
-            <span>Current Season: {activeSeason.name}</span>
-          </CardTitle>
-          <CardDescription className="text-white/80">
-            Registration is open until {endDate.toLocaleString()}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div>
-              <Label className="text-white/80">Name Length</Label>
-              <div className="font-medium text-white">
-                {activeSeason.minNameLength.toString()} - {activeSeason.maxNameLength.toString()} characters
+    <div className="mt-8 flex flex-col lg:flex-row gap-6">
+      {/* Left Column - Current Season (30%) */}
+      <div className="w-full lg:w-[30%]">
+        <Card className="bg-primary text-white border-primary">
+          <CardHeader>
+            <div className="flex items-center space-x-2 text-white/80 text-sm mb-2">
+              <Calendar className="h-4 w-4" />
+              <span>Current Season</span>
+            </div>
+            <CardTitle className="text-white text-xl mb-3">
+              {activeSeason.name}
+            </CardTitle>
+            <CardDescription className="text-white/80">
+              Registration is open until {endDate.toLocaleString()}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4 text-sm">
+              <div>
+                <Label className="text-white/80">Name Length</Label>
+                <div className="font-medium text-white">
+                  {activeSeason.minNameLength.toString()} - {activeSeason.maxNameLength.toString()} characters
+                </div>
+              </div>
+              <div>
+                <Label className="text-white/80">Available Names</Label>
+                <div className="font-medium text-white">
+                  {activeSeasonInfo.availableNames.toString()} available / {Number(activeSeason.maxNames) - Number(activeSeasonInfo.availableNames)} used
+                </div>
+              </div>
+              <div>
+                <Label className="text-white/80">Registration Price</Label>
+                <div className="font-medium flex items-center space-x-1 text-white">
+                  <Coins className="h-3 w-3" />
+                  <span>{(Number(activeSeasonInfo.price) / 100_000_000).toFixed(2)} ICP</span>
+                </div>
+              </div>
+              <div>
+                <Label className="text-white/80">Status</Label>
+                <div className="font-medium text-white">Active</div>
               </div>
             </div>
-            <div>
-              <Label className="text-white/80">Available Names</Label>
-              <div className="font-medium text-white">
-                {activeSeasonInfo.availableNames.toString()} available / {Number(activeSeason.maxNames) - Number(activeSeasonInfo.availableNames)} used
-              </div>
-            </div>
-            <div>
-              <Label className="text-white/80">Registration Price</Label>
-              <div className="font-medium flex items-center space-x-1 text-white">
-                <Coins className="h-3 w-3" />
-                <span>{(Number(activeSeasonInfo.price) / 100_000_000).toFixed(2)} ICP</span>
-              </div>
-            </div>
-            <div>
-              <Label className="text-white/80">Status</Label>
-              <div className="font-medium text-white">Active</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
-      {/* Registration Form */}
-      <Card>
+      {/* Right Column - Registration Form (70%) */}
+      <div className="w-full lg:w-[70%]">
+        <Card>
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <Globe className="h-5 w-5" />
@@ -319,29 +324,10 @@ export function RegisterNameForm() {
               <AlertDescription>
                 <strong>Important:</strong> You can only register ONE name per principal (globally, not per season).
                 Make sure your choice is final before submitting.
-                Payment of {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(8)} ICP will be processed automatically and includes a 1-year subscription.
+                Payment of {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(2)} ICP will be processed automatically and includes a 1-year subscription.
               </AlertDescription>
             </Alert>
 
-            {!balanceLoading && icpBalance !== undefined && activeSeasonInfo && (
-              (() => {
-                const required = Number(activeSeasonInfo.price) + 10000; // Include fee
-                const available = Number(icpBalance);
-                const hasInsufficientBalance = available < required;
-
-                return hasInsufficientBalance ? (
-                  <Alert className="border-yellow-500 bg-yellow-50">
-                    <AlertCircle className="h-4 w-4 text-yellow-600" />
-                    <AlertDescription className="text-yellow-800">
-                      <strong>Insufficient Balance:</strong> You need {(required / 100_000_000).toFixed(8)} ICP but only have {(available / 100_000_000).toFixed(8)} ICP.
-                      <div className="mt-1 text-sm">
-                        Please add more ICP to your wallet before proceeding.
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-                ) : null;
-              })()
-            )}
 
             {paymentVerificationMutation.isPending && (
               <Alert>
@@ -365,12 +351,6 @@ export function RegisterNameForm() {
                 <AlertCircle className="h-4 w-4 text-destructive" />
                 <AlertDescription className="text-destructive">
                   <strong>Payment Failed:</strong> {paymentVerificationMutation.error.message}
-                  {!balanceLoading && icpBalance !== undefined && (
-                    <div className="mt-2 text-sm">
-                      <div>Your current ICP balance: {(Number(icpBalance) / 100_000_000).toFixed(8)} ICP</div>
-                      <div>Required amount: {(Number(activeSeasonInfo?.price || 0) / 100_000_000 + 0.0001).toFixed(8)} ICP (including 0.0001 ICP fee)</div>
-                    </div>
-                  )}
                 </AlertDescription>
               </Alert>
             )}
@@ -379,9 +359,7 @@ export function RegisterNameForm() {
               type="submit"
               disabled={
                 paymentVerificationMutation.isPending ||
-                !canisterPrincipal ||
-                (!balanceLoading && icpBalance !== undefined && activeSeasonInfo &&
-                 Number(icpBalance) < (Number(activeSeasonInfo.price) + 10000))
+                !canisterPrincipal
               }
               className="w-full"
             >
@@ -393,13 +371,14 @@ export function RegisterNameForm() {
               ) : (
                 <>
                   <Coins className="mr-2 h-4 w-4" />
-                  Pay {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(8)} ICP & Register Name
+                  Pay {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(2)} ICP to Register @{watch('name') || 'name'}
                 </>
               )}
             </Button>
           </form>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }
