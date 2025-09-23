@@ -4,8 +4,13 @@ import { Actor, HttpAgent } from "@dfinity/agent";
 import { Principal } from "@dfinity/principal";
 import dotenv from "dotenv";
 
-// Load environment variables
-dotenv.config();
+// Load environment variables silently
+dotenv.config({
+  override: false,
+  debug: false,
+  // @ts-ignore - suppress dotenv v17+ tips
+  quiet: true
+});
 
 // Define the canister interface based on main.mo
 interface ContextRegistryCanister {
@@ -101,6 +106,7 @@ interface ContextRegistryCanister {
   getAdminPrincipal: () => Promise<[Principal] | []>;
   getAllAdmins: () => Promise<Principal[]>;
   getAdminCount: () => Promise<bigint>;
+  getCanisterVersion: () => Promise<{ major: number; minor: number; patch: number }>;
 
   // Financial
   getIcpBalance: () => Promise<bigint>;

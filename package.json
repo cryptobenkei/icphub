@@ -1,0 +1,15 @@
+{
+  "name": "icphub",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "registry"
+  ],
+  "scripts": {
+    "update-env": "node update-env.js",
+    "deploy": "cd registry && npm run deploy",
+    "deploy:local": "cd registry && npm run deploy:local",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:frontend": "cd frontend && npm run build"
+  }
+}

@@ -1,0 +1,367 @@
+# Querying ICP token balance from React: Complete technical guide
+
+## The critical error: Wrong canister ID
+
+The canister ID **`rdmx6-jaaaa-aaaaa-aaadq-cai`** that's causing your error is actually the **Internet Identity canister**, not the ICP ledger canister. Internet Identity is used for authentication across ICP applications and doesn't have token balance methods, which is why you're getting the "icrc1_balance_of method not found" error.
+
+**The correct ICP ledger canister ID is: `ryjl3-tyaaa-aaaaa-aaaba-cai`**
+
+This is the official mainnet canister ID for native ICP tokens, confirmed across all DFINITY documentation and deployed as part of the Network Nervous System (NNS).
+
+## Proper method calls for ICP balance queries
+
+The ICP ledger uniquely supports **both** legacy and modern method calls:
+
+### Legacy method: `account_balance`
+```javascript
+// Uses AccountIdentifier (32-byte hash)
+const balance = await ledger.account_balance({
+  account: accountIdentifier
+});
+```
+
+### ICRC-1 standard method: `icrc1_balance_of`
+```javascript
+// Uses Account structure with principal
+const balance = await ledger.icrc1_balance_of({
+  owner: principal,
+  subaccount: []
+});
+```
+
+Both methods work with the ICP ledger canister, but `icrc1_balance_of` follows the modern standard and is recommended for new applications.
+
+## Complete React implementation with code examples
+
+### Required dependencies and installation
+
+Install these packages in your React project:
+```bash
+npm install @dfinity/agent @dfinity/candid @dfinity/principal @dfinity/utils @dfinity/ledger-icp @dfinity/auth-client
+```
+
+**Key libraries:**
+- **@dfinity/ledger-icp** (v4.1.0) - Official ICP ledger interface with built-in methods
+- **@dfinity/agent** - HTTP agent for IC communication
+- **@dfinity/auth-client** - Internet Identity integration
+- **@dfinity/principal** - Principal ID handling
+
+### Complete implementation: Agent setup and balance query
+
+```javascript
+// utils/icpAgent.js
+import { HttpAgent } from '@dfinity/agent';
+import { LedgerCanister, AccountIdentifier } from '@dfinity/ledger-icp';
+import { Principal } from '@dfinity/principal';
+
+// Network configuration
+const HOST = process.env.DFX_NETWORK === 'local' 
+  ? 'http://127.0.0.1:4943' 
+  : 'https://icp-api.io';
+
+// ICP Ledger Canister ID (mainnet)
+export const ICP_LEDGER_CANISTER_ID = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
+
+// Create and configure HTTP Agent
+export const createICPAgent = async (identity = null) => {
+  const agent = new HttpAgent({
+    host: HOST,
+    identity: identity,
+  });
+
+  // CRITICAL: Only fetch root key for local development
+  if (process.env.DFX_NETWORK !== 'ic') {
+    await agent.fetchRootKey().catch(console.error);
+  }
+
+  return agent;
+};
+
+// Main function to query ICP balance
+export const queryICPBalance = async (principalString, identity = null) => {
+  try {
+    // Create agent with optional identity
+    const agent = await createICPAgent(identity);
+
+    // Create ledger canister instance
+    const ledgerCanister = LedgerCanister.create({
+      agent,
+      canisterId: ICP_LEDGER_CANISTER_ID,
+    });
+
+    // Convert Principal to AccountIdentifier
+    const principal = Principal.fromText(principalString);
+    const accountIdentifier = AccountIdentifier.fromPrincipal({
+      principal: principal,
+      subAccount: undefined
+    });
+
+    // Query the balance (returns e8s units)
+    const balanceE8s = await ledgerCanister.accountBalance({
+      accountIdentifier: accountIdentifier,
+      certified: false, // Use true for certified queries
+    });
+
+    // Convert e8s to ICP (1 ICP = 100,000,000 e8s)
+    const balanceICP = Number(balanceE8s) / 100_000_000;
+
+    return {
+      e8s: balanceE8s.toString(),
+      icp: balanceICP,
+      formatted: `${balanceICP.toFixed(8)} ICP`
+    };
+  } catch (error) {
+    console.error('Error querying ICP balance:', error);
+    throw error;
+  }
+};
+```
+
+### React hook for balance management
+
+```javascript
+// hooks/useICPBalance.js
+import { useState, useEffect } from 'react';
+import { queryICPBalance } from '../utils/icpAgent';
+
+export const useICPBalance = (principalId) => {
+  const [balance, setBalance] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchBalance = async () => {
+    if (!principalId) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const result = await queryICPBalance(principalId);
+      setBalance(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchBalance();
+  }, [principalId]);
+
+  return { balance, loading, error, refetch: fetchBalance };
+};
+```
+
+### React component implementation
+
+```jsx
+// components/ICPBalanceChecker.jsx
+import React, { useState } from 'react';
+import { useICPBalance } from '../hooks/useICPBalance';
+
+const ICPBalanceChecker = () => {
+  const [principalInput, setPrincipalInput] = useState('');
+  const [queryPrincipal, setQueryPrincipal] = useState('');
+  const { balance, loading, error } = useICPBalance(queryPrincipal);
+
+  const handleQuery = () => {
+    setQueryPrincipal(principalInput.trim());
+  };
+
+  return (
+    <div className="balance-checker">
+      <h2>ICP Balance Checker</h2>
+      
+      <div>
+        <input
+          type="text"
+          value={principalInput}
+          onChange={(e) => setPrincipalInput(e.target.value)}
+          placeholder="Enter Principal ID (e.g., 2vxsx-fae)"
+          style={{ width: '300px', padding: '8px' }}
+        />
+        <button onClick={handleQuery} disabled={loading}>
+          Query Balance
+        </button>
+      </div>
+
+      {loading && <p>Loading balance...</p>}
+      
+      {error && (
+        <div style={{ color: 'red' }}>
+          Error: {error}
+        </div>
+      )}
+      
+      {balance && (
+        <div style={{ marginTop: '20px' }}>
+          <h3>Balance Details:</h3>
+          <p><strong>ICP Balance:</strong> {balance.formatted}</p>
+          <p><strong>E8s Value:</strong> {balance.e8s}</p>
+          <p><strong>Principal:</strong> {queryPrincipal}</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ICPBalanceChecker;
+```
+
+### Alternative: Using ICRC-1 standard method
+
+```javascript
+// Using modern ICRC-1 method instead of legacy
+import { Actor, HttpAgent } from '@dfinity/agent';
+
+const icrc1IDL = ({ IDL }) => {
+  const Account = IDL.Record({
+    owner: IDL.Principal,
+    subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
+  });
+  
+  return IDL.Service({
+    icrc1_balance_of: IDL.Func([Account], [IDL.Nat], ['query']),
+  });
+};
+
+export const queryICRC1Balance = async (principalString) => {
+  const agent = await createICPAgent();
+  
+  const ledger = Actor.createActor(icrc1IDL, {
+    agent,
+    canisterId: 'ryjl3-tyaaa-aaaaa-aaaba-cai',
+  });
+
+  const principal = Principal.fromText(principalString);
+  const balance = await ledger.icrc1_balance_of({
+    owner: principal,
+    subaccount: [],
+  });
+
+  return Number(balance) / 100_000_000;
+};
+```
+
+## Common errors and troubleshooting solutions
+
+### Incorrect canister ID errors
+
+**Your specific error** occurs because `rdmx6-jaaaa-aaaaa-aaadq-cai` is the Internet Identity canister, not a token ledger. **Always use `ryjl3-tyaaa-aaaaa-aaaba-cai` for ICP tokens.**
+
+### Method not found errors
+
+Different canisters support different methods:
+- **ICP Ledger**: Supports both `account_balance` and `icrc1_balance_of`
+- **ICRC-1 tokens**: Only support `icrc1_balance_of`
+- **System canisters**: Don't support balance methods at all
+
+### Principal format issues
+
+Common mistakes include:
+- Using AccountIdentifier when Account type is expected
+- Not converting Principal strings properly
+- Missing subaccount parameter in ICRC-1 calls
+
+**Solution:**
+```javascript
+// Correct Principal conversion
+const principal = Principal.fromText('2vxsx-fae');
+
+// Correct AccountIdentifier creation
+const accountId = AccountIdentifier.fromPrincipal({
+  principal: principal,
+  subAccount: undefined // or specific 32-byte subaccount
+});
+```
+
+### Connection and CORS issues
+
+**Local development issues:**
+- Always call `fetchRootKey()` for local development
+- Use correct local host: `http://127.0.0.1:4943`
+
+**Production issues:**
+- **Never** call `fetchRootKey()` on mainnet
+- Use HTTPS endpoints: `https://icp-api.io` or `https://ic0.app`
+- Handle CORS by hosting frontend on IC or using proxy
+
+### Balance unit confusion
+
+ICP uses **e8s units** where **1 ICP = 100,000,000 e8s**. Common errors include:
+- Displaying e8s value directly without conversion
+- Integer overflow with large balances
+- Not accounting for transfer fees (10,000 e8s)
+
+**Correct conversion:**
+```javascript
+const formatICP = (e8sAmount) => {
+  const E8S_PER_ICP = 100_000_000;
+  return Number(e8sAmount) / E8S_PER_ICP;
+};
+```
+
+## ICP tokens vs ICRC-1 tokens: Key differences
+
+### Account representation fundamentally differs
+
+**ICP Ledger (Legacy):**
+- Uses **AccountIdentifier**: 32-byte hash of principal + subaccount
+- Provides anonymity but loses direct principal association
+- Cannot reverse AccountIdentifier to get original principal
+
+**ICRC-1 Standard:**
+- Uses **Account** record: `{ owner: principal; subaccount: opt blob }`
+- Transparent principal ownership
+- Direct principal visibility in all transactions
+
+### API method differences
+
+**ICP supports dual interfaces for backward compatibility:**
+- Legacy: `account_balance(AccountIdentifier)`
+- Modern: `icrc1_balance_of(Account)`
+
+**Pure ICRC-1 tokens only support:**
+- Standard: `icrc1_balance_of(Account)`
+- No legacy method support
+
+### Why this matters for your implementation
+
+The ICP ledger's dual support means you can use either method, but understanding which canister supports which methods prevents errors. The ICP ledger was deployed before the ICRC-1 standard existed, so it maintains both interfaces for compatibility. New tokens typically only implement ICRC-1.
+
+## Production-ready best practices
+
+**Environment configuration:**
+```javascript
+// .env files for different environments
+const CANISTER_IDS = {
+  ICP_LEDGER: process.env.REACT_APP_ICP_LEDGER_ID || 
+              'ryjl3-tyaaa-aaaaa-aaaba-cai',
+  NETWORK: process.env.REACT_APP_DFX_NETWORK || 'ic'
+};
+```
+
+**Error handling pattern:**
+```javascript
+try {
+  const balance = await queryICPBalance(principal);
+  // Handle success
+} catch (error) {
+  if (error.message.includes('Invalid principal')) {
+    // Handle invalid input
+  } else if (error.message.includes('Network')) {
+    // Handle connection issues
+  } else {
+    // Handle unknown errors
+  }
+}
+```
+
+**Security considerations:**
+- Use certified queries for critical operations
+- Validate all principal inputs before queries
+- Implement rate limiting for balance checks
+- Never expose sensitive keys in frontend code
+
+This comprehensive guide should resolve your immediate error and provide everything needed to successfully implement ICP balance queries in your React application. The key takeaway is using the correct canister ID (`ryjl3-tyaaa-aaaaa-aaaba-cai`) and understanding that ICP supports both legacy and modern query methods.
