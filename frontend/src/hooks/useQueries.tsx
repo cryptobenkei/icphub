@@ -506,7 +506,6 @@ export function usePaymentVerificationAndRegister() {
   const { actor } = useActor();
   const { identity, principal } = usePlugWallet();
   const queryClient = useQueryClient();
-  const { data: icpBalance } = useGetICPBalance();
 
   return useMutation({
     mutationFn: async ({
@@ -526,58 +525,34 @@ export function usePaymentVerificationAndRegister() {
     }) => {
       if (!actor || !identity) throw new Error('Not authenticated');
 
-      // Check if user has sufficient balance
-      const fee = 10000n; // Standard ICP fee (0.0001 ICP)
-      const totalRequired = amount + fee;
+      // Standard ICP fee (0.0001 ICP)
+      const fee = 10000n;
 
-      if (icpBalance === undefined) {
-        throw new Error('Unable to check your ICP balance. Please try again.');
+      // Step 1: Execute ICP Payment using Plug Wallet
+      if (!window.ic?.plug) {
+        throw new Error('Plug Wallet not available. Please install and connect Plug Wallet.');
       }
 
-      if (icpBalance < totalRequired) {
-        const requiredICP = Number(totalRequired) / 100_000_000;
-        const availableICP = Number(icpBalance) / 100_000_000;
-        throw new Error(`Insufficient ICP balance. You need ${requiredICP.toFixed(8)} ICP but only have ${availableICP.toFixed(8)} ICP.`);
+      // Use Plug Wallet's requestTransfer method
+      const transferResult = await window.ic.plug.requestTransfer({
+        to: canisterPrincipal,
+        amount: Number(amount),
+        opts: {
+          fee: Number(fee),
+          memo: 0,
+          from_subaccount: undefined,
+          created_at_time: undefined,
+        }
+      });
+
+      // Plug Wallet returns different formats - handle both success and error cases
+      if (!transferResult || (typeof transferResult === 'object' && 'err' in transferResult)) {
+        const errorMsg = transferResult?.err || 'Payment was cancelled or failed';
+        throw new Error(`Payment failed: ${errorMsg}`);
       }
 
-      // Step 1: Execute ICP Payment using correct ledger
-      const { HttpAgent } = await import('@dfinity/agent');
-      const { LedgerCanister, AccountIdentifier } = await import('@dfinity/ledger-icp');
-
-      const ICP_LEDGER_CANISTER_ID = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
-
-      const agent = new HttpAgent({
-        host: 'https://icp-api.io',
-        identity: identity,
-      });
-
-      const icpLedger = LedgerCanister.create({
-        agent,
-        canisterId: Principal.fromText(ICP_LEDGER_CANISTER_ID),
-      });
-
-      // Convert canister principal to AccountIdentifier
-      const canisterAccountId = AccountIdentifier.fromPrincipal({
-        principal: Principal.fromText(canisterPrincipal),
-        subAccount: undefined
-      });
-
-      const transferArgs = {
-        to: canisterAccountId,
-        amount: amount,
-        fee: fee,
-        memo: 0n,
-        fromSubAccount: undefined,
-        createdAtTime: undefined,
-      };
-
-      const transferResult: any = await icpLedger.transfer(transferArgs);
-
-      if ('Err' in transferResult) {
-        throw new Error(`Payment failed: ${JSON.stringify(transferResult.Err)}`);
-      }
-
-      const blockIndex = transferResult.Ok;
+      // For Plug Wallet, the result should contain the block index directly
+      const blockIndex = transferResult.height || transferResult;
 
       // Step 2: Wait a moment for the transaction to be processed
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -893,65 +868,19 @@ const createAccountIdentifierFromPrincipal = (principal: Principal): Uint8Array 
   return accountId;
 };
 
-// ICP Balance Query - Using correct ICP Ledger canister
-export function useGetICPBalance() {
-  const { identity, principal } = usePlugWallet();
+// File References Query
+export function useListFileReferences() {
+  const { actor, isFetching } = useActor();
 
-  return useQuery<bigint>({
-    queryKey: ['icpBalance', principal],
-    queryFn: async (): Promise<bigint> => {
-      if (!identity || identity.getPrincipal().isAnonymous() || !principal) {
-        throw new Error('No authenticated identity');
-      }
-
-      try {
-        // Import required modules
-        const { HttpAgent } = await import('@dfinity/agent');
-        const { LedgerCanister, AccountIdentifier } = await import('@dfinity/ledger-icp');
-
-        // Use correct ICP ledger canister ID from spec
-        const ICP_LEDGER_CANISTER_ID = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
-
-        // Create agent for mainnet
-        const agent = new HttpAgent({
-          host: 'https://icp-api.io',
-          identity: identity,
-        });
-
-        // Create ledger canister instance
-        const ledgerCanister = LedgerCanister.create({
-          agent,
-          canisterId: Principal.fromText(ICP_LEDGER_CANISTER_ID),
-        });
-
-        // Convert Principal to AccountIdentifier
-        const principal = identity.getPrincipal();
-        const accountIdentifier = AccountIdentifier.fromPrincipal({
-          principal: principal,
-          subAccount: undefined
-        });
-
-        console.log('🔍 Querying ICP balance for principal:', principal.toString());
-
-        // Query the balance (returns e8s units)
-        const balanceE8s = await ledgerCanister.accountBalance({
-          accountIdentifier: accountIdentifier,
-          certified: false, // Use false for faster queries
-        });
-
-        console.log('💰 ICP Balance (e8s):', balanceE8s.toString());
-        console.log('💰 ICP Balance (ICP):', Number(balanceE8s) / 100_000_000);
-
-        return balanceE8s;
-      } catch (error) {
-        console.error('❌ Error querying ICP balance:', error);
-        throw error;
-      }
+  return useQuery<Array<{path: string, hash: string}>>({
+    queryKey: ['fileReferences'],
+    queryFn: async () => {
+      if (!actor) throw new Error('Actor not available');
+      return actor.listFileReferences();
     },
-    enabled: !!identity && !identity.getPrincipal().isAnonymous() && !!principal,
-    retry: 2,
-    refetchInterval: 30000, // Refresh every 30 seconds
-    staleTime: 10000, // Consider data stale after 10 seconds
+    enabled: !!actor && !isFetching,
+    retry: false,
   });
 }
+
 

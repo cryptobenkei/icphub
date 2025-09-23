@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { usePlugWallet } from './hooks/usePlugWallet';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Heart, Copy } from 'lucide-react';
+import { Heart, Copy, Info } from 'lucide-react';
 import { RegisterNameForm } from './components/RegisterNameForm';
 import { MyNames } from './components/MyNames';
 import { AdminPanel } from './components/AdminPanel';
 import { Home } from './components/Home';
+import { SystemInfoPopup } from './components/SystemInfoPopup';
 import { Toaster } from '@/components/ui/sonner';
 import { useGetCallerUserProfile, useIsCallerAdmin, useHasRegisteredName, useGetUserNames, useGetCanisterVersion } from './hooks/useQueries';
 import { useQueryClient } from '@tanstack/react-query';
@@ -26,6 +27,7 @@ export default function App() {
   } = usePlugWallet();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState('home');
+  const [showSystemInfo, setShowSystemInfo] = useState(false);
 
   const isAuthenticated = isConnectionSuccess && !!identity && !identity.getPrincipal().isAnonymous();
   const principalId = isAuthenticated ? principal : null;
@@ -65,11 +67,11 @@ export default function App() {
 
   // Format canister version for display
   const formatVersion = (version: {major: bigint, minor: bigint, patch: bigint} | undefined): string => {
-    if (!version) return '';
+    if (!version) return 'v1.0.0'; // Fallback when backend is not available
     return `v${Number(version.major)}.${Number(version.minor)}.${Number(version.patch)}`;
   };
 
-  const formattedVersion = canisterVersion ? formatVersion(canisterVersion) : '';
+  const formattedVersion = formatVersion(canisterVersion);
 
 
   // Get canister ID from config
@@ -164,6 +166,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-accent/5">
       <Toaster />
+      <SystemInfoPopup isOpen={showSystemInfo} onClose={() => setShowSystemInfo(false)} />
       
       {/* Header */}
       <header className="border-b bg-white sticky top-0 z-50">
@@ -177,9 +180,7 @@ export default function App() {
               <div>
                 <h1 className="text-lg font-bold leading-tight">
                   IcpHub{' '}
-                  {formattedVersion && (
-                    <span className="text-xs text-muted-foreground font-normal">{formattedVersion}</span>
-                  )}
+                  <span className="text-xs text-muted-foreground font-normal ml-2">{formattedVersion}</span>
                 </h1>
                 <p className="text-xs text-muted-foreground">Talk to my Chain</p>
               </div>
@@ -285,6 +286,13 @@ export default function App() {
                   {isConnecting ? 'Connecting...' : 'Connect Wallet'}
                 </Button>
               )}
+              <button
+                onClick={() => setShowSystemInfo(true)}
+                className="h-8 w-8 ml-2 rounded-full bg-gray-300 hover:bg-gray-400 flex items-center justify-center transition-colors overflow-hidden"
+                title="System Information"
+              >
+                <img src="/icp.jpeg" alt="ICP Info" className="h-6 w-6 rounded-full object-cover" />
+              </button>
             </div>
           </div>
           
