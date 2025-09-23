@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { usePlugWallet } from './hooks/usePlugWallet';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Heart, Copy } from 'lucide-react';
 import { RegisterNameForm } from './components/RegisterNameForm';
 import { MyNames } from './components/MyNames';
@@ -72,16 +71,6 @@ export default function App() {
 
   const formattedVersion = canisterVersion ? formatVersion(canisterVersion) : '';
 
-  // Detect environment
-  const getEnvironment = (): 'prod' | 'local' => {
-    const hostname = window.location.hostname;
-    if (hostname === 'icphub.ai' || hostname.endsWith('.icphub.ai')) {
-      return 'prod';
-    }
-    return 'local';
-  };
-
-  const environment = getEnvironment();
 
   // Get canister ID from config
   const getCanisterId = async (): Promise<string> => {
@@ -190,13 +179,7 @@ export default function App() {
                   IcpHub{' '}
                   {formattedVersion && (
                     <span className="text-xs text-muted-foreground font-normal">{formattedVersion}</span>
-                  )}{' '}
-                  <Badge
-                    variant={environment === 'prod' ? 'default' : 'secondary'}
-                    className="text-xs"
-                  >
-                    {environment}
-                  </Badge>
+                  )}
                 </h1>
                 <p className="text-xs text-muted-foreground">Talk to my Chain</p>
               </div>

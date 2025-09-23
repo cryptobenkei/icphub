@@ -26,11 +26,7 @@ interface Config {
 let configCache: Config | null = null;
 
 function detectEnvironment(): 'local' | 'production' {
-    const hostname = window.location.hostname;
-    if (hostname === 'icphub.ai' || hostname.endsWith('.icphub.ai')) {
-        return 'production';
-    }
-    return 'local';
+    return 'production';
 }
 
 export async function loadConfig(): Promise<Config> {
