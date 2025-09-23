@@ -7,8 +7,8 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Globe, User, Calendar, AlertCircle, CheckCircle, Coins } from 'lucide-react';
-import { useRegisterName, useGetActiveSeason, useGetUserNames, useGetActiveSeasonInfo } from '../hooks/useQueries';
+import { Loader2, Globe, User, Calendar, AlertCircle, CheckCircle, Coins, Clock } from 'lucide-react';
+import { useRegisterName, useGetActiveSeason, useGetUserNames, useGetActiveSeasonInfo, usePaymentVerificationAndRegister, useGetCanisterPrincipal } from '../hooks/useQueries';
 import { useInternetIdentity } from '../hooks/useInternetIdentity';
 import { AddressType } from '../backend';
 
@@ -29,10 +29,11 @@ export function RegisterNameForm() {
     },
   });
 
-  const registerNameMutation = useRegisterName();
+  const paymentVerificationMutation = usePaymentVerificationAndRegister();
   const { activeSeason } = useGetActiveSeason();
   const { data: activeSeasonInfo } = useGetActiveSeasonInfo();
   const { data: userNames } = useGetUserNames();
+  const { data: canisterPrincipal } = useGetCanisterPrincipal();
   const addressType = watch('addressType');
 
   // Check if user already has any registered name (one name per principal globally)
@@ -46,16 +47,21 @@ export function RegisterNameForm() {
   }, [principalId, addressType, setValue]);
 
   const onSubmit = (data: FormData) => {
-    if (!activeSeason || !activeSeasonInfo) return;
+    if (!activeSeason || !activeSeasonInfo || !canisterPrincipal) return;
 
     // Convert string addressType to AddressType variant
     const addressType = data.addressType === 'canister' ? AddressType.canister : AddressType.identity;
 
-    registerNameMutation.mutate({
+    // Calculate the amount in e8s (1 ICP = 100_000_000 e8s)
+    const amount = BigInt(activeSeasonInfo.price);
+
+    paymentVerificationMutation.mutate({
       name: data.name,
       address: data.address,
       addressType,
       seasonId: activeSeason.id,
+      amount,
+      canisterPrincipal: canisterPrincipal.toString(),
     });
   };
 
@@ -277,16 +283,45 @@ export function RegisterNameForm() {
               <AlertDescription>
                 <strong>Important:</strong> You can only register ONE name per principal (globally, not per season).
                 Make sure your choice is final before submitting.
-                Payment of {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(2)} ICP will be processed automatically and includes a 1-year subscription.
+                Payment of {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(8)} ICP will be processed automatically and includes a 1-year subscription.
               </AlertDescription>
             </Alert>
 
+            {paymentVerificationMutation.isPending && (
+              <Alert>
+                <Clock className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>Processing Payment:</strong>
+                  <div className="mt-2 space-y-1 text-sm">
+                    <div>• Sending ICP payment to canister...</div>
+                    <div>• Waiting for blockchain confirmation...</div>
+                    <div>• Verifying payment and registering name...</div>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    This process may take 5-10 seconds. Please don't close this window.
+                  </p>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {paymentVerificationMutation.error && (
+              <Alert className="border-destructive bg-destructive/10">
+                <AlertCircle className="h-4 w-4 text-destructive" />
+                <AlertDescription className="text-destructive">
+                  <strong>Payment Failed:</strong> {paymentVerificationMutation.error.message}
+                  <div className="mt-2 text-sm">
+                    Please check your ICP balance and try again. If the issue persists, contact support.
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+
             <Button
               type="submit"
-              disabled={registerNameMutation.isPending}
+              disabled={paymentVerificationMutation.isPending || !canisterPrincipal}
               className="w-full"
             >
-              {registerNameMutation.isPending ? (
+              {paymentVerificationMutation.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Processing Payment & Registration...
@@ -294,7 +329,7 @@ export function RegisterNameForm() {
               ) : (
                 <>
                   <Coins className="mr-2 h-4 w-4" />
-                  Pay {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(2)} ICP & Register Name
+                  Pay {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(8)} ICP & Register Name
                 </>
               )}
             </Button>

@@ -1,13 +1,94 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useActor } from './useActor';
 import { useInternetIdentity } from './useInternetIdentity';
-import { NameRecord, AddressType, Season, UserProfile, Metadata, MarkdownContent, toAddressTypeVariant } from '../backend';
+import { NameRecord, AddressType, Season, UserProfile, Metadata, MarkdownContent, VerifiedPayment, toAddressTypeVariant } from '../backend';
 import { toast } from 'sonner';
+import { Actor, HttpAgent } from '@dfinity/agent';
+import { Principal } from '@dfinity/principal';
+import { loadConfig } from '../config';
+import { IDL } from '@dfinity/candid';
 
 // Utility function to convert backend season ID to user-friendly season number
 export function getSeasonNumber(seasonId: bigint): number {
   return Number(seasonId);
 }
+
+// ICP Ledger Integration Types and Functions
+type ICPAccount = {
+  owner: Principal;
+  subaccount?: Uint8Array;
+};
+
+type TransferArgs = {
+  to: ICPAccount;
+  amount: bigint;
+  fee?: bigint;
+  memo?: Uint8Array;
+  from_subaccount?: Uint8Array;
+  created_at_time?: bigint;
+};
+
+type TransferResult = {
+  Ok?: bigint;
+  Err?: any;
+};
+
+// ICP Ledger Canister Interface
+const icpLedgerInterface = () => {
+  const Account = IDL.Record({
+    owner: IDL.Principal,
+    subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
+  });
+
+  const TransferArg = IDL.Record({
+    to: Account,
+    fee: IDL.Opt(IDL.Nat),
+    memo: IDL.Opt(IDL.Vec(IDL.Nat8)),
+    from_subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
+    created_at_time: IDL.Opt(IDL.Nat64),
+    amount: IDL.Nat,
+  });
+
+  const TransferError = IDL.Variant({
+    BadFee: IDL.Record({ expected_fee: IDL.Nat }),
+    BadBurn: IDL.Record({ min_burn_amount: IDL.Nat }),
+    InsufficientFunds: IDL.Record({ balance: IDL.Nat }),
+    TooOld: IDL.Null,
+    CreatedInFuture: IDL.Record({ ledger_time: IDL.Nat64 }),
+    TemporarilyUnavailable: IDL.Null,
+    Duplicate: IDL.Record({ duplicate_of: IDL.Nat }),
+    GenericError: IDL.Record({
+      error_code: IDL.Nat,
+      message: IDL.Text,
+    }),
+  });
+
+  return IDL.Service({
+    icrc1_transfer: IDL.Func([TransferArg], [IDL.Variant({ Ok: IDL.Nat, Err: TransferError })], []),
+    icrc1_balance_of: IDL.Func([Account], [IDL.Nat], ['query']),
+  });
+};
+
+// Create ICP Ledger Actor
+const createIcpLedgerActor = async (identity: any) => {
+  const config = await loadConfig();
+  const icpLedgerCanisterId = 'rrkah-fqaaa-aaaaa-aaaaq-cai'; // ICP Ledger canister ID
+
+  const agent = new HttpAgent({
+    host: config.backend_host || 'https://ic0.app',
+    identity,
+  });
+
+  // Only fetch root key in development
+  if (process.env.NODE_ENV === 'development') {
+    await agent.fetchRootKey();
+  }
+
+  return Actor.createActor(icpLedgerInterface, {
+    agent,
+    canisterId: icpLedgerCanisterId,
+  });
+};
 
 // User Profile Queries
 export function useGetCallerUserProfile() {
@@ -154,6 +235,16 @@ type MarkdownContent = record {
   updatedAt : int;
 };
 
+type VerifiedPayment = record {
+  id : nat;
+  payer : principal;
+  amount : nat;
+  blockIndex : nat;
+  transactionHash : opt text;
+  verifiedAt : int;
+  registrationId : opt nat;
+};
+
 service : {
   // User Profile Management
   getCallerUserProfile : () -> (opt UserProfile) query;
@@ -176,8 +267,15 @@ service : {
   getActiveSeason : () -> (Season) query;
   getActiveSeasonInfo : () -> (record { season : Season; availableNames : nat; price : nat }) query;
 
-  // Name Registration
-  registerName : (text, text, AddressType, text, nat) -> ();
+  // Name Registration (DEPRECATED - use verifyAndRegisterName)
+  registerName : (text, text, AddressType, text, nat) -> (nat);
+
+  // Payment Verification and Registration
+  verifyAndRegisterName : (text, text, AddressType, nat, nat) -> (nat);
+  checkBlockIndexUsed : (nat) -> (bool) query;
+  getPaymentHistory : () -> (vec VerifiedPayment) query;
+  getPaymentByBlockIndex : (nat) -> (opt VerifiedPayment);
+
   getNameRecord : (text) -> (NameRecord) query;
   listNameRecords : () -> (vec NameRecord) query;
   hasRegisteredName : (text) -> (bool) query;
@@ -446,6 +544,121 @@ export function useRegisterName() {
     },
   });
 }
+
+// Payment Verification and Registration Hook (PRD Implementation)
+export function usePaymentVerificationAndRegister() {
+  const { actor } = useActor();
+  const { identity } = useInternetIdentity();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      name,
+      address,
+      addressType,
+      seasonId,
+      amount,
+      canisterPrincipal
+    }: {
+      name: string;
+      address: string;
+      addressType: AddressType;
+      seasonId: bigint;
+      amount: bigint;
+      canisterPrincipal: string;
+    }) => {
+      if (!actor || !identity) throw new Error('Not authenticated');
+
+      // Step 1: Execute ICP Payment
+      const icpLedger = await createIcpLedgerActor(identity);
+
+      const transferArgs = {
+        to: {
+          owner: Principal.fromText(canisterPrincipal),
+          subaccount: [],
+        },
+        amount: amount,
+        fee: [10000n], // Standard ICP fee (0.0001 ICP)
+        memo: [],
+        from_subaccount: [],
+        created_at_time: [],
+      };
+
+      const transferResult: any = await icpLedger.icrc1_transfer(transferArgs);
+
+      if ('Err' in transferResult) {
+        throw new Error(`Payment failed: ${JSON.stringify(transferResult.Err)}`);
+      }
+
+      const blockIndex = transferResult.Ok;
+
+      // Step 2: Wait a moment for the transaction to be processed
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Step 3: Call verifyAndRegisterName with the block index
+      const paymentId = await actor.verifyAndRegisterName(
+        name,
+        address,
+        addressType,
+        seasonId,
+        blockIndex
+      );
+
+      return { paymentId, blockIndex };
+    },
+    onSuccess: (result, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['nameRecord', variables.name] });
+      queryClient.invalidateQueries({ queryKey: ['nameRecords'] });
+      queryClient.invalidateQueries({ queryKey: ['seasons'] });
+      queryClient.invalidateQueries({ queryKey: ['activeSeasonInfo'] });
+      queryClient.invalidateQueries({ queryKey: ['hasRegisteredName'] });
+      queryClient.invalidateQueries({ queryKey: ['userNames'] });
+      queryClient.invalidateQueries({ queryKey: ['userSubscription'] });
+      queryClient.invalidateQueries({ queryKey: ['payments'] });
+      queryClient.invalidateQueries({ queryKey: ['paymentHistory'] });
+
+      toast.success(`Name registered successfully! Payment verified at block ${result.blockIndex}.`);
+
+      // Dispatch custom event to trigger navigation to the settings page
+      window.dispatchEvent(new CustomEvent('switchTab', { detail: 'my-name' }));
+    },
+    onError: (error) => {
+      toast.error(`Registration failed: ${error.message}`);
+    },
+  });
+}
+
+// Payment History Query
+export function useGetPaymentHistory() {
+  const { actor, isFetching } = useActor();
+  const { identity } = useInternetIdentity();
+
+  return useQuery<VerifiedPayment[]>({
+    queryKey: ['paymentHistory', identity?.getPrincipal().toString()],
+    queryFn: async () => {
+      if (!actor || !identity) throw new Error('Not authenticated');
+      return actor.getPaymentHistory();
+    },
+    enabled: !!actor && !isFetching && !!identity,
+    retry: false,
+  });
+}
+
+// Check Block Index Usage Query
+export function useCheckBlockIndexUsed(blockIndex?: number) {
+  const { actor, isFetching } = useActor();
+
+  return useQuery({
+    queryKey: ['blockIndexUsed', blockIndex],
+    queryFn: async () => {
+      if (!actor || blockIndex === undefined) throw new Error('Actor not available or block index undefined');
+      return actor.checkBlockIndexUsed(BigInt(blockIndex));
+    },
+    enabled: !!actor && !isFetching && blockIndex !== undefined,
+    retry: false,
+  });
+}
+
 
 
 // Name Metadata Management Queries

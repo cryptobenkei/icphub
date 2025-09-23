@@ -19,6 +19,7 @@ import type {
   Subscription as SubscriptionImport,
   SubscriptionType as SubscriptionTypeImport,
   TransferResult as TransferResultImport,
+  VerifiedPayment as VerifiedPaymentImport,
   _SERVICE
 } from './declarations/context_registry/context_registry.did';
 
@@ -38,6 +39,7 @@ export type PaymentStatus = PaymentStatusImport;
 export type Subscription = SubscriptionImport;
 export type SubscriptionType = SubscriptionTypeImport;
 export type TransferResult = TransferResultImport;
+export type VerifiedPayment = VerifiedPaymentImport;
 export type backendInterface = _SERVICE;
 
 // AddressType value constants for runtime use
