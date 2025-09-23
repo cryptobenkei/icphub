@@ -19,7 +19,7 @@ import {
 } from '../hooks/useQueries';
 import { AddressType } from '../backend';
 import { toast } from 'sonner';
-import { useInternetIdentity } from '../hooks/useInternetIdentity';
+import { usePlugWallet } from '../hooks/usePlugWallet';
 import { useActor } from '../hooks/useActor';
 
 // Whitelist configuration
@@ -80,7 +80,7 @@ function NameManagement({ record }: { record: any }) {
   const saveDidMutation = useSaveNameDid();
 
   // Admin registration logic
-  const { identity } = useInternetIdentity();
+  const { identity } = usePlugWallet();
   const { actor } = useActor();
   const [isRegisteringForAdmin, setIsRegisteringForAdmin] = useState(false);
 

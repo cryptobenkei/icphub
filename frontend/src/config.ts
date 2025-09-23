@@ -4,10 +4,15 @@ const DEFAULT_STORAGE_GATEWAY_URL = 'https://dev-blob.caffeine.ai';
 const DEFAULT_BUCKET_NAME = 'default-bucket';
 const DEFAULT_PROJECT_ID = '0000000-0000-0000-0000-00000000000';
 
-interface JsonConfig {
+interface EnvironmentConfig {
     backend_host: string;
     backend_canister_id: string;
     project_id: string;
+}
+
+interface JsonConfig {
+    local: EnvironmentConfig;
+    production: EnvironmentConfig;
 }
 
 interface Config {
@@ -20,19 +25,30 @@ interface Config {
 
 let configCache: Config | null = null;
 
+function detectEnvironment(): 'local' | 'production' {
+    const hostname = window.location.hostname;
+    if (hostname === 'icphub.ai' || hostname.endsWith('.icphub.ai')) {
+        return 'production';
+    }
+    return 'local';
+}
+
 export async function loadConfig(): Promise<Config> {
     if (configCache) {
         return configCache;
     }
     try {
         const response = await fetch('./env.json');
-        const config = (await response.json()) as JsonConfig;
+        const allConfigs = (await response.json()) as JsonConfig;
+        const environment = detectEnvironment();
+        const envConfig = allConfigs[environment];
+
         const fullConfig = {
-            backend_host: config.backend_host == 'undefined' ? undefined : config.backend_host,
-            backend_canister_id: config.backend_canister_id == 'undefined' ? canisterId : config.backend_canister_id,
+            backend_host: envConfig.backend_host == 'undefined' ? undefined : envConfig.backend_host,
+            backend_canister_id: envConfig.backend_canister_id == 'undefined' ? canisterId : envConfig.backend_canister_id,
             storage_gateway_url: process.env.STORAGE_GATEWAY_URL ?? 'nogateway',
             bucket_name: DEFAULT_BUCKET_NAME,
-            project_id: config.project_id && config.project_id !== 'undefined' ? config.project_id : DEFAULT_PROJECT_ID
+            project_id: envConfig.project_id && envConfig.project_id !== 'undefined' ? envConfig.project_id : DEFAULT_PROJECT_ID
         };
         configCache = fullConfig;
         return fullConfig;
@@ -75,5 +91,15 @@ export async function createActorWithConfig(options?: CreateActorOptions): Promi
         };
     }
     return createActor(config.backend_canister_id, options);
+}
+
+export async function getWhitelistForPlug(): Promise<string[]> {
+    const config = await loadConfig();
+    return [config.backend_canister_id];
+}
+
+export async function getHostForPlug(): Promise<string> {
+    const config = await loadConfig();
+    return config.backend_host || 'https://mainnet.dfinity.network';
 }
 

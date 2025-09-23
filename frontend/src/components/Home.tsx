@@ -1,18 +1,18 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Brain, Database, Zap, Shield } from 'lucide-react';
 import { useGetActiveSeasonInfo, useHasRegisteredName, getSeasonNumber } from '../hooks/useQueries';
-import { useInternetIdentity } from '../hooks/useInternetIdentity';
+import { usePlugWallet } from '../hooks/usePlugWallet';
 
 export function Home() {
-  const { identity, login } = useInternetIdentity();
-  const isAuthenticated = !!identity && !identity.getPrincipal().isAnonymous();
+  const { identity, connect, isConnectionSuccess } = usePlugWallet();
+  const isAuthenticated = isConnectionSuccess && !!identity && !identity.getPrincipal().isAnonymous();
   
   const { data: seasonInfo, isLoading: seasonLoading } = useGetActiveSeasonInfo();
   const { data: hasRegisteredName = false, isLoading: nameCheckLoading } = useHasRegisteredName();
 
   const handleGetYourName = () => {
     if (!isAuthenticated) {
-      login();
+      connect();
       return;
     }
     // Switch to register tab
@@ -22,7 +22,7 @@ export function Home() {
 
   const handleRegisterName = () => {
     if (!isAuthenticated) {
-      login();
+      connect();
       return;
     }
     // This will be handled by parent component tab switching

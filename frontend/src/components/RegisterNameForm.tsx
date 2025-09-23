@@ -8,9 +8,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Globe, User, Calendar, AlertCircle, CheckCircle, Coins, Clock } from 'lucide-react';
-import { useRegisterName, useGetActiveSeason, useGetUserNames, useGetActiveSeasonInfo, usePaymentVerificationAndRegister, useGetCanisterPrincipal } from '../hooks/useQueries';
-import { useInternetIdentity } from '../hooks/useInternetIdentity';
+import { useRegisterName, useGetActiveSeason, useGetUserNames, useGetActiveSeasonInfo, usePaymentVerificationAndRegister, useGetCanisterPrincipal, useGetICPBalance } from '../hooks/useQueries';
+import { usePlugWallet } from '../hooks/usePlugWallet';
 import { AddressType } from '../backend';
+import { Principal } from '@dfinity/principal';
 
 interface FormData {
   name: string;
@@ -18,9 +19,46 @@ interface FormData {
   addressType: string;
 }
 
+// Validation functions
+const isValidPrincipal = (address: string): boolean => {
+  try {
+    Principal.fromText(address);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const isValidCanisterId = (address: string): boolean => {
+  try {
+    const principal = Principal.fromText(address);
+    // Canister IDs typically end with -cai suffix or similar patterns
+    // For now, we'll just validate it's a valid principal format
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const validateAddress = (address: string, addressType: string): string | undefined => {
+  if (!address) return 'Address is required';
+
+  if (addressType === 'canister') {
+    if (!isValidCanisterId(address)) {
+      return 'Invalid canister ID format';
+    }
+  } else {
+    if (!isValidPrincipal(address)) {
+      return 'Invalid principal ID format';
+    }
+  }
+
+  return undefined;
+};
+
 export function RegisterNameForm() {
-  const { identity } = useInternetIdentity();
-  const principalId = identity?.getPrincipal().toString() || '';
+  const { identity, principal } = usePlugWallet();
+  const principalId = principal || '';
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     defaultValues: {
@@ -34,6 +72,7 @@ export function RegisterNameForm() {
   const { data: activeSeasonInfo } = useGetActiveSeasonInfo();
   const { data: userNames } = useGetUserNames();
   const { data: canisterPrincipal } = useGetCanisterPrincipal();
+  const { data: icpBalance, isLoading: balanceLoading } = useGetICPBalance();
   const addressType = watch('addressType');
 
   // Check if user already has any registered name (one name per principal globally)
@@ -195,12 +234,12 @@ export function RegisterNameForm() {
               <Label htmlFor="name">Name</Label>
               <Input
                 id="name"
-                placeholder="my-awesome-name"
+                placeholder="my_awesome-name"
                 {...register('name', {
                   required: 'Name is required',
                   pattern: {
-                    value: /^[a-z0-9-]+$/,
-                    message: 'Only lowercase letters, numbers, and hyphens allowed',
+                    value: /^[a-z0-9_-]+$/,
+                    message: 'Only lowercase letters, numbers, underscores, and hyphens allowed',
                   },
                   minLength: {
                     value: Number(activeSeason.minNameLength),
@@ -262,10 +301,7 @@ export function RegisterNameForm() {
                 }
                 {...register('address', {
                   required: 'Address is required',
-                  minLength: {
-                    value: 10,
-                    message: 'Address must be at least 10 characters',
-                  },
+                  validate: (value) => validateAddress(value, addressType),
                 })}
               />
               {errors.address && (
@@ -286,6 +322,26 @@ export function RegisterNameForm() {
                 Payment of {(Number(activeSeasonInfo.price) / 100_000_000).toFixed(8)} ICP will be processed automatically and includes a 1-year subscription.
               </AlertDescription>
             </Alert>
+
+            {!balanceLoading && icpBalance !== undefined && activeSeasonInfo && (
+              (() => {
+                const required = Number(activeSeasonInfo.price) + 10000; // Include fee
+                const available = Number(icpBalance);
+                const hasInsufficientBalance = available < required;
+
+                return hasInsufficientBalance ? (
+                  <Alert className="border-yellow-500 bg-yellow-50">
+                    <AlertCircle className="h-4 w-4 text-yellow-600" />
+                    <AlertDescription className="text-yellow-800">
+                      <strong>Insufficient Balance:</strong> You need {(required / 100_000_000).toFixed(8)} ICP but only have {(available / 100_000_000).toFixed(8)} ICP.
+                      <div className="mt-1 text-sm">
+                        Please add more ICP to your wallet before proceeding.
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                ) : null;
+              })()
+            )}
 
             {paymentVerificationMutation.isPending && (
               <Alert>
@@ -309,16 +365,24 @@ export function RegisterNameForm() {
                 <AlertCircle className="h-4 w-4 text-destructive" />
                 <AlertDescription className="text-destructive">
                   <strong>Payment Failed:</strong> {paymentVerificationMutation.error.message}
-                  <div className="mt-2 text-sm">
-                    Please check your ICP balance and try again. If the issue persists, contact support.
-                  </div>
+                  {!balanceLoading && icpBalance !== undefined && (
+                    <div className="mt-2 text-sm">
+                      <div>Your current ICP balance: {(Number(icpBalance) / 100_000_000).toFixed(8)} ICP</div>
+                      <div>Required amount: {(Number(activeSeasonInfo?.price || 0) / 100_000_000 + 0.0001).toFixed(8)} ICP (including 0.0001 ICP fee)</div>
+                    </div>
+                  )}
                 </AlertDescription>
               </Alert>
             )}
 
             <Button
               type="submit"
-              disabled={paymentVerificationMutation.isPending || !canisterPrincipal}
+              disabled={
+                paymentVerificationMutation.isPending ||
+                !canisterPrincipal ||
+                (!balanceLoading && icpBalance !== undefined && activeSeasonInfo &&
+                 Number(icpBalance) < (Number(activeSeasonInfo.price) + 10000))
+              }
               className="w-full"
             >
               {paymentVerificationMutation.isPending ? (

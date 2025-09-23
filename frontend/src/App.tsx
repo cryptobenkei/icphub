@@ -1,36 +1,106 @@
 import { useState, useEffect } from 'react';
-import { useInternetIdentity } from './hooks/useInternetIdentity';
+import { usePlugWallet } from './hooks/usePlugWallet';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { User, Heart, Copy } from 'lucide-react';
+import { Heart, Copy } from 'lucide-react';
 import { RegisterNameForm } from './components/RegisterNameForm';
 import { MyNames } from './components/MyNames';
 import { AdminPanel } from './components/AdminPanel';
 import { Home } from './components/Home';
 import { Toaster } from '@/components/ui/sonner';
-import { useGetCallerUserProfile, useIsCallerAdmin, useHasRegisteredName, useGetUserNames } from './hooks/useQueries';
+import { useGetCallerUserProfile, useIsCallerAdmin, useHasRegisteredName, useGetUserNames, useGetCanisterVersion } from './hooks/useQueries';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 export default function App() {
-  const { identity, login, clear, isLoggingIn } = useInternetIdentity();
+  const {
+    identity,
+    connect,
+    disconnect,
+    isConnecting,
+    isConnectionSuccess,
+    isConnectionError,
+    connectionError,
+    isPlugInstalled,
+    principal
+  } = usePlugWallet();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState('home');
 
-  const isAuthenticated = !!identity && !identity.getPrincipal().isAnonymous();
-  const principalId = isAuthenticated ? identity.getPrincipal().toString() : null;
+  const isAuthenticated = isConnectionSuccess && !!identity && !identity.getPrincipal().isAnonymous();
+  const principalId = isAuthenticated ? principal : null;
   
   const { data: userProfile } = useGetCallerUserProfile();
   const { data: isAdmin = false } = useIsCallerAdmin();
   const { data: hasRegisteredName = false, isLoading: hasNameLoading } = useHasRegisteredName();
   const { data: userNames = [] } = useGetUserNames();
+  const { data: canisterVersion } = useGetCanisterVersion();
+
+
+  // Show installation prompt if Plug is not installed
+  useEffect(() => {
+    if (!isPlugInstalled && !isConnectionSuccess) {
+      const timer = setTimeout(() => {
+        toast.error('Plug Wallet not detected. Please install Plug Wallet to connect.', {
+          action: {
+            label: 'Install Plug',
+            onClick: () => window.open('https://chrome.google.com/webstore/detail/plug/cfbfdhimifdmdehjmkdobpcjfefblkjm', '_blank')
+          },
+          duration: 10000
+        });
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [isPlugInstalled, isConnectionSuccess]);
+
+  // Show connection errors
+  useEffect(() => {
+    if (isConnectionError && connectionError) {
+      toast.error(`Connection failed: ${connectionError.message}`);
+    }
+  }, [isConnectionError, connectionError]);
 
   // Get the first registered name for display in navigation
   const displayName = userNames.length > 0 ? userNames[0].name : null;
 
+  // Format canister version for display
+  const formatVersion = (version: {major: bigint, minor: bigint, patch: bigint} | undefined): string => {
+    if (!version) return '';
+    return `v${Number(version.major)}.${Number(version.minor)}.${Number(version.patch)}`;
+  };
+
+  const formattedVersion = canisterVersion ? formatVersion(canisterVersion) : '';
+
+  // Detect environment
+  const getEnvironment = (): 'prod' | 'local' => {
+    const hostname = window.location.hostname;
+    if (hostname === 'icphub.ai' || hostname.endsWith('.icphub.ai')) {
+      return 'prod';
+    }
+    return 'local';
+  };
+
+  const environment = getEnvironment();
+
+  // Get canister ID from config
+  const getCanisterId = async (): Promise<string> => {
+    try {
+      const config = await import('./config').then(m => m.loadConfig());
+      return config.backend_canister_id;
+    } catch {
+      return 'Loading...';
+    }
+  };
+
+  const [canisterId, setCanisterId] = useState<string>('Loading...');
+
+  useEffect(() => {
+    getCanisterId().then(setCanisterId);
+  }, []);
+
   const handleLogout = async () => {
-    await clear();
+    await disconnect();
     // Clear all cached data to ensure fresh data on next login
     queryClient.clear();
   };
@@ -39,6 +109,13 @@ export default function App() {
     if (principalId) {
       navigator.clipboard.writeText(principalId);
       toast.success('Principal ID copied to clipboard');
+    }
+  };
+
+  const copyCanisterId = () => {
+    if (canisterId && canisterId !== 'Loading...') {
+      navigator.clipboard.writeText(canisterId);
+      toast.success('Canister ID copied to clipboard');
     }
   };
 
@@ -58,7 +135,7 @@ export default function App() {
       // Clear all cached data when logging in to ensure fresh data
       queryClient.invalidateQueries();
     }
-  }, [identity?.getPrincipal().toString(), queryClient]);
+  }, [principal, queryClient]);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -70,8 +147,8 @@ export default function App() {
             <p className="text-muted-foreground mb-4">
               Connect your wallet to register names during active seasons
             </p>
-            <Button onClick={login} disabled={isLoggingIn}>
-              {isLoggingIn ? 'Connecting...' : 'Connect Wallet'}
+            <Button onClick={connect} disabled={isConnecting}>
+              {isConnecting ? 'Connecting...' : 'Connect Wallet'}
             </Button>
           </div>
         );
@@ -83,8 +160,8 @@ export default function App() {
             <p className="text-muted-foreground mb-4">
               Connect your wallet to view your registered names
             </p>
-            <Button onClick={login} disabled={isLoggingIn}>
-              {isLoggingIn ? 'Connecting...' : 'Connect Wallet'}
+            <Button onClick={connect} disabled={isConnecting}>
+              {isConnecting ? 'Connecting...' : 'Connect Wallet'}
             </Button>
           </div>
         );
@@ -100,43 +177,37 @@ export default function App() {
       <Toaster />
       
       {/* Header */}
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
+      <header className="border-b bg-white sticky top-0 z-50">
+        <div className="container mx-auto px-4 py-2">
           <div className="flex items-center justify-between">
             {/* Logo and Title */}
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-primary/10 rounded-lg">
-                <img src="/logo.png" alt="IcpHub" className="h-6 w-6" />
+            <div className="flex items-center space-x-2">
+              <div className="p-1 bg-primary/10 rounded-lg">
+                <img src="/face.png" alt="IcpHub" className="h-6 w-6" />
               </div>
               <div>
-                <h1 className="text-xl font-bold">IcpHub</h1>
-                <p className="text-sm text-muted-foreground">AI Community for ICP</p>
+                <h1 className="text-lg font-bold leading-tight">
+                  IcpHub{' '}
+                  {formattedVersion && (
+                    <span className="text-xs text-muted-foreground font-normal">{formattedVersion}</span>
+                  )}{' '}
+                  <Badge
+                    variant={environment === 'prod' ? 'default' : 'secondary'}
+                    className="text-xs"
+                  >
+                    {environment}
+                  </Badge>
+                </h1>
+                <p className="text-xs text-muted-foreground">Talk to my Chain</p>
               </div>
             </div>
             
-            {/* Principal ID Display */}
-            {isAuthenticated && principalId && (
-              <div className="hidden lg:flex items-center space-x-2 bg-muted/50 rounded-lg px-3 py-2">
-                <User className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs font-mono text-muted-foreground">
-                  {principalId.length > 20 ? `${principalId.slice(0, 10)}...${principalId.slice(-10)}` : principalId}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={copyPrincipalId}
-                  className="h-6 w-6 p-0"
-                >
-                  <Copy className="h-3 w-3" />
-                </Button>
-              </div>
-            )}
             
             {/* Horizontal Navigation Menu */}
-            <nav className="flex items-center space-x-4 sm:space-x-6">
+            <nav className="flex items-center space-x-3 sm:space-x-4">
               <button
                 onClick={() => setActiveTab('home')}
-                className={`px-2 sm:px-3 py-2 text-sm font-medium transition-colors border-b-2 ${
+                className={`px-2 sm:px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
                   activeTab === 'home'
                     ? 'text-primary border-primary'
                     : 'text-muted-foreground hover:text-foreground border-transparent hover:border-muted-foreground/30'
@@ -150,7 +221,7 @@ export default function App() {
                   {!hasRegisteredName ? (
                     <button
                       onClick={() => setActiveTab('register')}
-                      className={`px-2 sm:px-3 py-2 text-sm font-medium transition-colors border-b-2 ${
+                      className={`px-2 sm:px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
                         activeTab === 'register'
                           ? 'text-primary border-primary'
                           : 'text-muted-foreground hover:text-foreground border-transparent hover:border-muted-foreground/30'
@@ -161,7 +232,7 @@ export default function App() {
                   ) : (
                     <button
                       onClick={() => setActiveTab('my-name')}
-                      className={`px-2 sm:px-3 py-2 text-sm font-medium transition-colors border-b-2 ${
+                      className={`px-2 sm:px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
                         activeTab === 'my-name'
                           ? 'text-primary border-primary'
                           : 'text-muted-foreground hover:text-foreground border-transparent hover:border-muted-foreground/30'
@@ -176,7 +247,7 @@ export default function App() {
               {isAuthenticated && isAdmin && (
                 <button
                   onClick={() => setActiveTab('admin')}
-                  className={`px-2 sm:px-3 py-2 text-sm font-medium transition-colors border-b-2 ${
+                  className={`px-2 sm:px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
                     activeTab === 'admin'
                       ? 'text-primary border-primary'
                       : 'text-muted-foreground hover:text-foreground border-transparent hover:border-muted-foreground/30'
@@ -188,7 +259,7 @@ export default function App() {
             </nav>
             
             {/* User Actions */}
-            <div className="flex items-center space-x-2 sm:space-x-4">
+            <div className="flex items-center space-x-2 sm:space-x-3">
               {isAuthenticated ? (
                 <div className="flex items-center space-x-2 sm:space-x-3">
                   {/* TODO: Fix userProfile type issue
@@ -199,43 +270,41 @@ export default function App() {
                     </div>
                   )}
                   */}
-                  <Badge variant="outline" className="bg-primary/5 hidden sm:inline-flex">
-                    Connected
-                  </Badge>
+                  <div className="flex items-center group hidden sm:inline-flex">
+                    <span className="text-xs text-muted-foreground">Principal:</span>
+                    <span
+                      className="text-xs font-mono text-foreground cursor-pointer hover:text-primary transition-colors ml-1"
+                      title={principalId}
+                      onClick={copyPrincipalId}
+                    >
+                      {principalId.length > 15 ? `${principalId.slice(0, 8)}...${principalId.slice(-6)}` : principalId}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={copyPrincipalId}
+                      className="h-3 w-3 p-0 opacity-0 group-hover:opacity-100 transition-opacity ml-1"
+                    >
+                      <Copy className="h-2 w-2" />
+                    </Button>
+                  </div>
                   <Button variant="outline" onClick={handleLogout} size="sm">
                     Disconnect
                   </Button>
                 </div>
               ) : (
-                <Button 
-                  onClick={login} 
-                  disabled={isLoggingIn}
+                <Button
+                  onClick={connect}
+                  disabled={isConnecting}
                   className="bg-primary hover:bg-primary/90"
                   size="sm"
                 >
-                  {isLoggingIn ? 'Connecting...' : 'Connect Wallet'}
+                  {isConnecting ? 'Connecting...' : 'Connect Wallet'}
                 </Button>
               )}
             </div>
           </div>
           
-          {/* Mobile Principal ID Display */}
-          {isAuthenticated && principalId && (
-            <div className="lg:hidden mt-3 flex items-center justify-center space-x-2 bg-muted/50 rounded-lg px-3 py-2">
-              <User className="h-4 w-4 text-muted-foreground" />
-              <span className="text-xs font-mono text-muted-foreground">
-                {principalId.length > 30 ? `${principalId.slice(0, 15)}...${principalId.slice(-15)}` : principalId}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={copyPrincipalId}
-                className="h-6 w-6 p-0"
-              >
-                <Copy className="h-3 w-3" />
-              </Button>
-            </div>
-          )}
         </div>
       </header>
 

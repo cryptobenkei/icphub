@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useActor } from './useActor';
-import { useInternetIdentity } from './useInternetIdentity';
+import { usePlugWallet } from './usePlugWallet';
 import { NameRecord, AddressType, Season, UserProfile, Metadata, MarkdownContent, VerifiedPayment, toAddressTypeVariant } from '../backend';
 import { toast } from 'sonner';
 import { Actor, HttpAgent } from '@dfinity/agent';
@@ -31,63 +31,6 @@ type TransferArgs = {
 type TransferResult = {
   Ok?: bigint;
   Err?: any;
-};
-
-// ICP Ledger Canister Interface
-const icpLedgerInterface = () => {
-  const Account = IDL.Record({
-    owner: IDL.Principal,
-    subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
-  });
-
-  const TransferArg = IDL.Record({
-    to: Account,
-    fee: IDL.Opt(IDL.Nat),
-    memo: IDL.Opt(IDL.Vec(IDL.Nat8)),
-    from_subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
-    created_at_time: IDL.Opt(IDL.Nat64),
-    amount: IDL.Nat,
-  });
-
-  const TransferError = IDL.Variant({
-    BadFee: IDL.Record({ expected_fee: IDL.Nat }),
-    BadBurn: IDL.Record({ min_burn_amount: IDL.Nat }),
-    InsufficientFunds: IDL.Record({ balance: IDL.Nat }),
-    TooOld: IDL.Null,
-    CreatedInFuture: IDL.Record({ ledger_time: IDL.Nat64 }),
-    TemporarilyUnavailable: IDL.Null,
-    Duplicate: IDL.Record({ duplicate_of: IDL.Nat }),
-    GenericError: IDL.Record({
-      error_code: IDL.Nat,
-      message: IDL.Text,
-    }),
-  });
-
-  return IDL.Service({
-    icrc1_transfer: IDL.Func([TransferArg], [IDL.Variant({ Ok: IDL.Nat, Err: TransferError })], []),
-    icrc1_balance_of: IDL.Func([Account], [IDL.Nat], ['query']),
-  });
-};
-
-// Create ICP Ledger Actor
-const createIcpLedgerActor = async (identity: any) => {
-  const config = await loadConfig();
-  const icpLedgerCanisterId = 'rrkah-fqaaa-aaaaa-aaaaq-cai'; // ICP Ledger canister ID
-
-  const agent = new HttpAgent({
-    host: config.backend_host || 'https://ic0.app',
-    identity,
-  });
-
-  // Only fetch root key in development
-  if (process.env.NODE_ENV === 'development') {
-    await agent.fetchRootKey();
-  }
-
-  return Actor.createActor(icpLedgerInterface, {
-    agent,
-    canisterId: icpLedgerCanisterId,
-  });
 };
 
 // User Profile Queries
@@ -134,10 +77,10 @@ export function useSaveCallerUserProfile() {
 // Admin Queries - Updated to use the existing isCallerAdmin method
 export function useIsCallerAdmin() {
   const { actor, isFetching } = useActor();
-  const { identity } = useInternetIdentity();
+  const { identity, principal } = usePlugWallet();
 
   return useQuery<boolean>({
-    queryKey: ['isCallerAdmin', identity?.getPrincipal().toString()],
+    queryKey: ['isCallerAdmin', principal],
     queryFn: async () => {
       if (!actor || !identity) return false;
       try {
@@ -162,6 +105,22 @@ export function useGetCanisterPrincipal() {
       if (!actor) throw new Error('Actor not available');
       const principal = await actor.getCanisterPrincipal();
       return principal.toString();
+    },
+    enabled: !!actor && !isFetching,
+    retry: false,
+  });
+}
+
+// Get canister version
+export function useGetCanisterVersion() {
+  const { actor, isFetching } = useActor();
+
+  return useQuery<{major: bigint, minor: bigint, patch: bigint}>({
+    queryKey: ['canisterVersion'],
+    queryFn: async () => {
+      if (!actor) throw new Error('Actor not available');
+      const version = await actor.getCanisterVersion();
+      return version;
     },
     enabled: !!actor && !isFetching,
     retry: false,
@@ -481,23 +440,22 @@ export function useListNameRecords() {
 
 export function useHasRegisteredName() {
   const { actor, isFetching } = useActor();
-  const { identity } = useInternetIdentity();
+  const { identity, principal } = usePlugWallet();
 
   return useQuery<boolean>({
-    queryKey: ['hasRegisteredName', identity?.getPrincipal().toString()],
+    queryKey: ['hasRegisteredName', principal],
     queryFn: async () => {
-      if (!actor || !identity) return false;
-      const owner = identity.getPrincipal().toString();
-      return actor.hasRegisteredName(owner);
+      if (!actor || !identity || !principal) return false;
+      return actor.hasRegisteredName(principal);
     },
-    enabled: !!actor && !isFetching && !!identity,
+    enabled: !!actor && !isFetching && !!identity && !!principal,
     retry: false,
   });
 }
 
 export function useRegisterName() {
   const { actor } = useActor();
-  const { identity } = useInternetIdentity();
+  const { identity, principal } = usePlugWallet();
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -512,16 +470,14 @@ export function useRegisterName() {
       addressType: AddressType;
       seasonId: bigint;
     }) => {
-      if (!actor || !identity) throw new Error('Not authenticated');
-
-      const owner = identity.getPrincipal().toString();
+      if (!actor || !identity || !principal) throw new Error('Not authenticated');
 
       // AddressType is already in variant format
 
       // Call registerName with payment integration
       // Note: In a real implementation, you would need to attach ICP cycles to this call
       // For now, we're calling the function directly and the backend will validate payment
-      const paymentId = await actor.registerName(name, address, addressType, owner, seasonId);
+      const paymentId = await actor.registerName(name, address, addressType, principal, seasonId);
 
       return paymentId;
     },
@@ -548,8 +504,9 @@ export function useRegisterName() {
 // Payment Verification and Registration Hook (PRD Implementation)
 export function usePaymentVerificationAndRegister() {
   const { actor } = useActor();
-  const { identity } = useInternetIdentity();
+  const { identity, principal } = usePlugWallet();
   const queryClient = useQueryClient();
+  const { data: icpBalance } = useGetICPBalance();
 
   return useMutation({
     mutationFn: async ({
@@ -569,22 +526,52 @@ export function usePaymentVerificationAndRegister() {
     }) => {
       if (!actor || !identity) throw new Error('Not authenticated');
 
-      // Step 1: Execute ICP Payment
-      const icpLedger = await createIcpLedgerActor(identity);
+      // Check if user has sufficient balance
+      const fee = 10000n; // Standard ICP fee (0.0001 ICP)
+      const totalRequired = amount + fee;
+
+      if (icpBalance === undefined) {
+        throw new Error('Unable to check your ICP balance. Please try again.');
+      }
+
+      if (icpBalance < totalRequired) {
+        const requiredICP = Number(totalRequired) / 100_000_000;
+        const availableICP = Number(icpBalance) / 100_000_000;
+        throw new Error(`Insufficient ICP balance. You need ${requiredICP.toFixed(8)} ICP but only have ${availableICP.toFixed(8)} ICP.`);
+      }
+
+      // Step 1: Execute ICP Payment using correct ledger
+      const { HttpAgent } = await import('@dfinity/agent');
+      const { LedgerCanister, AccountIdentifier } = await import('@dfinity/ledger-icp');
+
+      const ICP_LEDGER_CANISTER_ID = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
+
+      const agent = new HttpAgent({
+        host: 'https://icp-api.io',
+        identity: identity,
+      });
+
+      const icpLedger = LedgerCanister.create({
+        agent,
+        canisterId: Principal.fromText(ICP_LEDGER_CANISTER_ID),
+      });
+
+      // Convert canister principal to AccountIdentifier
+      const canisterAccountId = AccountIdentifier.fromPrincipal({
+        principal: Principal.fromText(canisterPrincipal),
+        subAccount: undefined
+      });
 
       const transferArgs = {
-        to: {
-          owner: Principal.fromText(canisterPrincipal),
-          subaccount: [],
-        },
+        to: canisterAccountId,
         amount: amount,
-        fee: [10000n], // Standard ICP fee (0.0001 ICP)
-        memo: [],
-        from_subaccount: [],
-        created_at_time: [],
+        fee: fee,
+        memo: 0n,
+        fromSubAccount: undefined,
+        createdAtTime: undefined,
       };
 
-      const transferResult: any = await icpLedger.icrc1_transfer(transferArgs);
+      const transferResult: any = await icpLedger.transfer(transferArgs);
 
       if ('Err' in transferResult) {
         throw new Error(`Payment failed: ${JSON.stringify(transferResult.Err)}`);
@@ -631,10 +618,10 @@ export function usePaymentVerificationAndRegister() {
 // Payment History Query
 export function useGetPaymentHistory() {
   const { actor, isFetching } = useActor();
-  const { identity } = useInternetIdentity();
+  const { identity, principal } = usePlugWallet();
 
   return useQuery<VerifiedPayment[]>({
-    queryKey: ['paymentHistory', identity?.getPrincipal().toString()],
+    queryKey: ['paymentHistory', principal],
     queryFn: async () => {
       if (!actor || !identity) throw new Error('Not authenticated');
       return actor.getPaymentHistory();
@@ -863,14 +850,13 @@ export function useGetActiveSeason() {
 
 // Helper function to get user's registered names
 export function useGetUserNames() {
-  const { identity } = useInternetIdentity();
+  const { identity, principal } = usePlugWallet();
   const { data: allNames = [] } = useListNameRecords();
-  
-  if (!identity) return { data: [], isLoading: false };
-  
-  const userPrincipal = identity.getPrincipal().toString();
-  const userNames = allNames.filter(record => record.owner === userPrincipal);
-  
+
+  if (!identity || !principal) return { data: [], isLoading: false };
+
+  const userNames = allNames.filter(record => record.owner === principal);
+
   return {
     data: userNames,
     isLoading: false,
@@ -880,9 +866,92 @@ export function useGetUserNames() {
 // Helper function to get registration count for a season
 export function useGetSeasonRegistrationCount(seasonId: bigint | null) {
   const { data: allNames = [] } = useListNameRecords();
-  
+
   if (seasonId === null) return 0;
-  
+
   return allNames.filter(record => record.seasonId === seasonId).length;
+}
+
+// Helper function to create AccountIdentifier from Principal
+const createAccountIdentifierFromPrincipal = (principal: Principal): Uint8Array => {
+  // We need to create a proper AccountIdentifier
+  // This is a simplified version - the real AccountIdentifier involves CRC32 checksum
+  // For now, let's try using the principal bytes directly padded to 32 bytes
+  const principalBytes = principal.toUint8Array();
+
+  // Create 32-byte account identifier (simplified approach)
+  const accountId = new Uint8Array(32);
+
+  // Place principal bytes at the end (right-aligned)
+  if (principalBytes.length <= 32) {
+    accountId.set(principalBytes, 32 - principalBytes.length);
+  } else {
+    // If somehow principal is longer, truncate from the left
+    accountId.set(principalBytes.slice(principalBytes.length - 32));
+  }
+
+  return accountId;
+};
+
+// ICP Balance Query - Using correct ICP Ledger canister
+export function useGetICPBalance() {
+  const { identity, principal } = usePlugWallet();
+
+  return useQuery<bigint>({
+    queryKey: ['icpBalance', principal],
+    queryFn: async (): Promise<bigint> => {
+      if (!identity || identity.getPrincipal().isAnonymous() || !principal) {
+        throw new Error('No authenticated identity');
+      }
+
+      try {
+        // Import required modules
+        const { HttpAgent } = await import('@dfinity/agent');
+        const { LedgerCanister, AccountIdentifier } = await import('@dfinity/ledger-icp');
+
+        // Use correct ICP ledger canister ID from spec
+        const ICP_LEDGER_CANISTER_ID = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
+
+        // Create agent for mainnet
+        const agent = new HttpAgent({
+          host: 'https://icp-api.io',
+          identity: identity,
+        });
+
+        // Create ledger canister instance
+        const ledgerCanister = LedgerCanister.create({
+          agent,
+          canisterId: Principal.fromText(ICP_LEDGER_CANISTER_ID),
+        });
+
+        // Convert Principal to AccountIdentifier
+        const principal = identity.getPrincipal();
+        const accountIdentifier = AccountIdentifier.fromPrincipal({
+          principal: principal,
+          subAccount: undefined
+        });
+
+        console.log('🔍 Querying ICP balance for principal:', principal.toString());
+
+        // Query the balance (returns e8s units)
+        const balanceE8s = await ledgerCanister.accountBalance({
+          accountIdentifier: accountIdentifier,
+          certified: false, // Use false for faster queries
+        });
+
+        console.log('💰 ICP Balance (e8s):', balanceE8s.toString());
+        console.log('💰 ICP Balance (ICP):', Number(balanceE8s) / 100_000_000);
+
+        return balanceE8s;
+      } catch (error) {
+        console.error('❌ Error querying ICP balance:', error);
+        throw error;
+      }
+    },
+    enabled: !!identity && !identity.getPrincipal().isAnonymous() && !!principal,
+    retry: 2,
+    refetchInterval: 30000, // Refresh every 30 seconds
+    staleTime: 10000, // Consider data stale after 10 seconds
+  });
 }
 

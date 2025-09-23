@@ -4,10 +4,10 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, CreditCard, CheckCircle, Clock, ExternalLink } from 'lucide-react';
 import { useGetPaymentHistory } from '../hooks/useQueries';
-import { useInternetIdentity } from '../hooks/useInternetIdentity';
+import { usePlugWallet } from '../hooks/usePlugWallet';
 
 export function PaymentHistory() {
-  const { identity } = useInternetIdentity();
+  const { identity } = usePlugWallet();
   const { data: paymentHistory, isLoading, error } = useGetPaymentHistory();
 
   if (!identity) {

@@ -1,44 +1,66 @@
-import { useInternetIdentity } from './useInternetIdentity';
+import { usePlugWallet } from './usePlugWallet';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { type backendInterface } from '../backend';
 import { createActorWithConfig } from '../config';
+import { idlFactory } from '../declarations/context_registry/context_registry.did.js';
 
 // initializeAccessControl is already part of the backend interface
 
 const ACTOR_QUERY_KEY = 'actor';
 export function useActor() {
-    const { identity } = useInternetIdentity();
+    const { identity, agent, isConnectionSuccess, principal } = usePlugWallet();
     const queryClient = useQueryClient();
+
     const actorQuery = useQuery<backendInterface>({
-        queryKey: [ACTOR_QUERY_KEY, identity?.getPrincipal().toString()],
+        queryKey: [ACTOR_QUERY_KEY, principal],
         queryFn: async () => {
-            const isAuthenticated = !!identity;
+            const isAuthenticated = isConnectionSuccess && !!identity && !!agent;
 
             if (!isAuthenticated) {
                 // Return anonymous actor if not authenticated
                 return await createActorWithConfig();
             }
 
-            const actorOptions = {
-                agentOptions: {
-                    identity
-                }
-            };
+            // Use Plug Wallet to create actor directly
+            const config = await import('../config').then(m => m.loadConfig());
 
-            const actor = await createActorWithConfig(actorOptions);
-            // Check if initializeAccessControl exists and call it (some backends may not have this method)
-            if (
-                'initializeAccessControl' in actor &&
-                typeof actor.initializeAccessControl === 'function'
-            ) {
-                await actor.initializeAccessControl();
+            try {
+                const actor = await window.ic!.plug!.createActor({
+                    canisterId: config.backend_canister_id,
+                    interfaceFactory: idlFactory
+                });
+
+                // Check if initializeAccessControl exists and call it
+                if (
+                    'initializeAccessControl' in actor &&
+                    typeof actor.initializeAccessControl === 'function'
+                ) {
+                    await actor.initializeAccessControl();
+                }
+                return actor;
+            } catch (error) {
+                console.error('Failed to create Plug actor, falling back to standard actor:', error);
+
+                // Fallback to standard actor creation with Plug identity
+                const actorOptions = {
+                    agentOptions: {
+                        identity
+                    }
+                };
+
+                const actor = await createActorWithConfig(actorOptions);
+                if (
+                    'initializeAccessControl' in actor &&
+                    typeof actor.initializeAccessControl === 'function'
+                ) {
+                    await actor.initializeAccessControl();
+                }
+                return actor;
             }
-            return actor;
         },
         // Only refetch when identity changes
         staleTime: Infinity,
-        // This will cause the actor to be recreated when the identity changes
         enabled: true
     });
 
