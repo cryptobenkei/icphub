@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Globe, User, Calendar, AlertCircle, CheckCircle, Coins, Clock } from 'lucide-react';
-import { useRegisterName, useGetActiveSeason, useGetUserNames, useGetActiveSeasonInfo, usePaymentVerificationAndRegister, useGetCanisterPrincipal } from '../hooks/useQueries';
+import { useRegisterName, useGetUserNames, useGetActiveSeasonInfo, usePaymentVerificationAndRegister, useGetCanisterPrincipal } from '../hooks/useQueries';
 import { usePlugWallet } from '../hooks/usePlugWallet';
 import { AddressType } from '../backend';
 import { Principal } from '@dfinity/principal';
@@ -68,11 +68,13 @@ export function RegisterNameForm() {
   });
 
   const paymentVerificationMutation = usePaymentVerificationAndRegister();
-  const { activeSeason } = useGetActiveSeason();
   const { data: activeSeasonInfo } = useGetActiveSeasonInfo();
   const { data: userNames } = useGetUserNames();
   const { data: canisterPrincipal } = useGetCanisterPrincipal();
   const addressType = watch('addressType');
+
+  // Extract active season from activeSeasonInfo
+  const activeSeason = activeSeasonInfo?.season;
 
   // Check if user already has any registered name (one name per principal globally)
   const hasRegisteredName = userNames && userNames.length > 0;
@@ -85,7 +87,7 @@ export function RegisterNameForm() {
   }, [principalId, addressType, setValue]);
 
   const onSubmit = (data: FormData) => {
-    if (!activeSeason || !activeSeasonInfo || !canisterPrincipal) return;
+    if (!activeSeasonInfo || !activeSeason || !canisterPrincipal) return;
 
     // Convert string addressType to AddressType variant
     const addressType = data.addressType === 'canister' ? AddressType.canister : AddressType.identity;
@@ -103,7 +105,7 @@ export function RegisterNameForm() {
     });
   };
 
-  if (!activeSeason || !activeSeasonInfo) {
+  if (!activeSeasonInfo || !activeSeason) {
     return (
       <Card>
         <CardContent className="text-center py-8">

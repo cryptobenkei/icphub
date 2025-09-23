@@ -3,7 +3,10 @@
     "context_registry": {
       "main": "src/context-registry/main.mo",
       "type": "motoko",
-      "args": "--enhanced-orthogonal-persistence"
+      "args": "--enhanced-orthogonal-persistence",
+      "upgrade_options": {
+        "wasm_memory_persistence": "opt"
+      }
     }
   },
   "defaults": {

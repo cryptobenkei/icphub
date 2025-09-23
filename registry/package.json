@@ -1,6 +1,6 @@
 {
   "name": "context-registry",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Context Registry - Motoko-based Internet Computer canister for seasonal name registrations",
   "main": "dist/index.js",
   "type": "module",

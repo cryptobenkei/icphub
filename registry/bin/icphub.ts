@@ -1719,6 +1719,198 @@ class ICPHubCLI {
     }
   }
 
+  async withdrawIcp() {
+    await this.printStandardHeader("withdraw");
+
+    // Restrict withdraw to production environment only
+    if (this.currentEnv !== 'production') {
+      console.log("❌ Error: Withdraw is only available in production environment");
+      console.log("   Switch to production: icphub env production");
+      console.log("   Reason: Local development uses test tokens with no real value");
+      return;
+    }
+
+    const actor = this.manager.getActor();
+    if (!actor) throw new Error("Actor not initialized");
+
+    try {
+      // Check admin status first
+      const { spawn } = await import('child_process');
+      const principalProcess = spawn('dfx', ['identity', 'get-principal'], { stdio: 'pipe' });
+      let dfxPrincipal = '';
+
+      principalProcess.stdout?.on('data', (data) => {
+        dfxPrincipal += data.toString();
+      });
+
+      await new Promise((resolve, reject) => {
+        principalProcess.on('close', (code) => {
+          if (code === 0) resolve(code);
+          else reject(new Error(`Failed to get DFX principal`));
+        });
+      });
+
+      dfxPrincipal = dfxPrincipal.trim();
+
+      const allAdmins = await actor.getAllAdmins();
+      const isAdmin = allAdmins.some(admin => admin.toString() === dfxPrincipal);
+
+      if (!isAdmin) {
+        console.log("❌ Error: Only admins can withdraw ICP");
+        return;
+      }
+
+      // Get current balance using dfx (since getIcpBalance requires admin access)
+      const network = this.currentEnv === 'production' ? 'ic' : 'local';
+      const icpProcess = spawn('dfx', ['canister', '--network', network, 'call', 'context_registry', 'getIcpBalance', '--query'], { stdio: 'pipe' });
+      let icpOutput = '';
+      icpProcess.stdout?.on('data', (data) => {
+        icpOutput += data.toString();
+      });
+
+      await new Promise((resolve) => {
+        icpProcess.on('close', () => resolve(0));
+      });
+
+      // Parse the balance from dfx output
+      const icpBalance = icpOutput.match(/\((\d+(?:_\d+)*)\s*:\s*nat\)/)?.[1]?.replace(/_/g, '') || '0';
+      const currentBalanceIcp = parseInt(icpBalance) / 100_000_000;
+
+      if (currentBalanceIcp === 0) {
+        console.log("❌ Error: No ICP balance available for withdrawal");
+        console.log(`   Current balance: ${currentBalanceIcp.toFixed(8)} ICP`);
+        return;
+      }
+
+      console.log(`💰 Current ICP Balance: ${currentBalanceIcp.toFixed(8)} ICP`);
+      console.log("");
+
+      // Interactive prompts
+      const readline = await import('readline');
+
+      // Recipient principal
+      const rl1 = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      const recipientPrincipal = await new Promise<string>((resolve) => {
+        rl1.question('Recipient Principal ID: ', (answer) => {
+          rl1.close();
+          resolve(answer.trim());
+        });
+      });
+
+      // Validate Principal ID format
+      if (!recipientPrincipal || recipientPrincipal.length < 20 || !recipientPrincipal.includes('-')) {
+        console.log("❌ Error: Invalid Principal ID format");
+        return;
+      }
+
+      // Amount to withdraw
+      const rl2 = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      const amountStr = await new Promise<string>((resolve) => {
+        rl2.question(`Amount to withdraw (ICP, max ${currentBalanceIcp.toFixed(8)}): `, (answer) => {
+          rl2.close();
+          resolve(answer.trim());
+        });
+      });
+
+      const amountIcp = parseFloat(amountStr);
+      if (isNaN(amountIcp) || amountIcp <= 0) {
+        console.log("❌ Error: Amount must be a positive number");
+        return;
+      }
+
+      if (amountIcp > currentBalanceIcp) {
+        console.log(`❌ Error: Insufficient balance. Available: ${currentBalanceIcp.toFixed(8)} ICP`);
+        return;
+      }
+
+      // Convert ICP to e8s (1 ICP = 100,000,000 e8s)
+      const amountE8s = Math.floor(amountIcp * 100_000_000);
+
+      // Show summary and confirmation
+      console.log("");
+      console.log("Withdrawal Summary:");
+      console.log(`   From: Canister Treasury`);
+      console.log(`   To: ${recipientPrincipal}`);
+      console.log(`   Amount: ${amountIcp.toFixed(8)} ICP (${amountE8s} e8s)`);
+      console.log(`   Remaining: ${(currentBalanceIcp - amountIcp).toFixed(8)} ICP`);
+      console.log("");
+
+      const envName = this.currentEnv === 'production' ? 'production' : 'local';
+      console.log(`⚠️  This will withdraw ${amountIcp.toFixed(8)} ICP from the canister treasury.`);
+      console.log(`\x1b[1m\x1b[33mTo continue write "${envName}"\x1b[0m`);
+
+      const rl3 = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      const confirmation = await new Promise<string>((resolve) => {
+        rl3.question('', (answer) => {
+          rl3.close();
+          resolve(answer.trim().toLowerCase());
+        });
+      });
+
+      if (confirmation !== envName) {
+        console.log("Operation cancelled.");
+        return;
+      }
+
+      // Execute withdrawal via dfx
+      const dfxArgs = [
+        'canister',
+        '--network',
+        network,
+        'call',
+        'context_registry',
+        'withdrawIcp',
+        `(principal "${recipientPrincipal}", ${amountE8s})`
+      ];
+
+      const dfxProcess = spawn('dfx', dfxArgs, { stdio: 'pipe' });
+
+      let output = '';
+      dfxProcess.stdout?.on('data', (data) => {
+        output += data.toString();
+      });
+      dfxProcess.stderr?.on('data', (data) => {
+        output += data.toString();
+      });
+
+      await new Promise((resolve, reject) => {
+        dfxProcess.on('close', (code) => {
+          if (code === 0) {
+            // Check if withdrawal was successful
+            if (output.includes('ok')) {
+              console.log(`✅ Successfully withdrew ${amountIcp.toFixed(8)} ICP`);
+              console.log(`   Sent to: ${recipientPrincipal}`);
+              console.log(`   Amount: ${amountE8s} e8s`);
+            } else {
+              console.log(`❌ Withdrawal failed`);
+              console.log(`   Response: ${output}`);
+            }
+            resolve(code);
+          } else {
+            console.log(`❌ Failed to execute withdrawal`);
+            console.log(`   Error: ${output}`);
+            reject(new Error(`dfx command failed with code ${code}`));
+          }
+        });
+      });
+
+    } catch (error) {
+      console.log("❌ Error during withdrawal:", (error as Error).message || error);
+    }
+  }
+
   async showHelp() {
     await this.printStandardHeader("help");
     console.log(`🔧 Available CLIs:`);
@@ -1737,6 +1929,7 @@ class ICPHubCLI {
     console.log(`  icphub status                    Show canister status and overview`);
     console.log(`  icphub balance                   Show canister ICP and cycles balances`);
     console.log(`  icphub wallet                    Show wallet info and balances`);
+    console.log(`  icphub withdraw                  Withdraw ICP from canister treasury (admin only)`);
     console.log(``);
     console.log(`📅 Season Management:`);
     console.log(`  icphub seasons                   List all seasons`);
@@ -1764,6 +1957,7 @@ class ICPHubCLI {
     console.log(`  icphub env production`);
     console.log(`  icphub status`);
     console.log(`  icphub wallet`);
+    console.log(`  icphub withdraw`);
     console.log(`  icphub seasons`);
     console.log(`  icphub season 1 status`);
     console.log(`  icphub seasons add "Spring 2025" "01/03/2025 09:00" "31/05/2025 18:00" 100 3 20 1000000`);
@@ -1858,6 +2052,10 @@ async function main() {
 
       case "wallet":
         await cli.showWallet();
+        break;
+
+      case "withdraw":
+        await cli.withdrawIcp();
         break;
 
       case "seasons":

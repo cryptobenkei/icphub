@@ -9,7 +9,7 @@ import { AdminPanel } from './components/AdminPanel';
 import { Home } from './components/Home';
 import { SystemInfoPopup } from './components/SystemInfoPopup';
 import { Toaster } from '@/components/ui/sonner';
-import { useGetCallerUserProfile, useIsCallerAdmin, useHasRegisteredName, useGetUserNames, useGetCanisterVersion } from './hooks/useQueries';
+import { useGetCallerUserProfile, useIsCallerAdmin, useHasRegisteredName, useGetUserNames, useGetCanisterVersion, useGetActiveSeasonInfo } from './hooks/useQueries';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -37,6 +37,7 @@ export default function App() {
   const { data: hasRegisteredName = false, isLoading: hasNameLoading } = useHasRegisteredName();
   const { data: userNames = [] } = useGetUserNames();
   const { data: canisterVersion } = useGetCanisterVersion();
+  const { data: activeSeasonInfo, isLoading: seasonLoading } = useGetActiveSeasonInfo();
 
 
   // Show installation prompt if Plug is not installed
@@ -200,20 +201,27 @@ export default function App() {
                 Home
               </button>
               
-              {isAuthenticated && !hasNameLoading && (
+              {isAuthenticated && (
                 <>
-                  {!hasRegisteredName ? (
+                  {/* Show Register button if: loading OR no registered name */}
+                  {(hasNameLoading || !hasRegisteredName) && (
                     <button
-                      onClick={() => setActiveTab('register')}
+                      onClick={() => !hasNameLoading && !seasonLoading && setActiveTab('register')}
+                      disabled={hasNameLoading || seasonLoading}
                       className={`px-2 sm:px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${
                         activeTab === 'register'
                           ? 'text-primary border-primary'
-                          : 'text-muted-foreground hover:text-foreground border-transparent hover:border-muted-foreground/30'
+                          : (hasNameLoading || seasonLoading)
+                            ? 'text-muted-foreground/50 border-transparent cursor-not-allowed'
+                            : 'text-muted-foreground hover:text-foreground border-transparent hover:border-muted-foreground/30'
                       }`}
                     >
                       Register
                     </button>
-                  ) : (
+                  )}
+
+                  {/* Show My Name button if has registered name */}
+                  {!hasNameLoading && hasRegisteredName && (
                     <button
                       onClick={() => setActiveTab('my-name')}
                       className={`px-2 sm:px-3 py-1.5 text-sm font-medium transition-colors border-b-2 ${

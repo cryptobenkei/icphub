@@ -14,8 +14,6 @@ import Result "mo:base/Result";
 import Blob "mo:base/Blob";
 import ExperimentalCycles "mo:base/ExperimentalCycles";
 import Set "mo:base/HashMap";
-import SHA224 "mo:sha224/SHA224";
-import CRC32 "mo:crc32/CRC32";
 
 // Enhanced Orthogonal Persistence Actor - Safe Migration Pattern
 persistent actor Self {
@@ -182,7 +180,7 @@ persistent actor Self {
   public type MigrationInfo = MigrationManager.MigrationInfo;
 
   // Current version
-  transient let CURRENT_VERSION : Version = { major = 1; minor = 0; patch = 0 };
+  transient let CURRENT_VERSION : Version = { major = 1; minor = 0; patch = 1 };
 
   // Migration manager for safe upgrades
   transient let migrationManager = MigrationManager.MigrationManager();
@@ -431,6 +429,16 @@ persistent actor Self {
     false;
   };
 
+  // Account ID utility functions (for ICP payment verification)
+
+  // Convert Principal to Account ID (32-byte identifier used by ICP Ledger)
+  // Simplified version: for payment verification, we check if recipient owner matches our principal
+  private func getCanisterAccountOwner() : Principal {
+    // For ICP transfers, the account owner is the canister principal itself
+    // The account ID conversion happens in the ledger, but the owner field still shows the principal
+    Principal.fromActor(Self);
+  };
+
   // Payment verification functions (PRD requirement)
 
   // Check if a block index has been used to prevent replay attacks
@@ -576,7 +584,8 @@ persistent actor Self {
         let requiredAmount = season.price;
 
         // Verify payment using ICP Ledger
-        let canisterPrincipal = Principal.fromActor(Self);
+        // Use canister principal as account owner (account ID conversion handled by ledger)
+        let canisterPrincipal = getCanisterAccountOwner();
         let paymentVerified = await verifyPaymentAtBlock(
           blockIndex,
           caller,
