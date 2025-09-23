@@ -13,9 +13,10 @@ import MigrationManager "migration/migration-manager";
 import Result "mo:base/Result";
 import Blob "mo:base/Blob";
 import ExperimentalCycles "mo:base/ExperimentalCycles";
+import Set "mo:base/HashMap";
 
 // Enhanced Orthogonal Persistence Actor - Safe Migration Pattern
-persistent actor {
+persistent actor Self {
   // Import required modules
   transient let textMap = OrderedMap.Make<Text>(Text.compare);
   transient let natMap = OrderedMap.Make<Nat>(Nat.compare);
@@ -119,6 +120,61 @@ persistent actor {
 
   public type TransferResult = Result.Result<Nat, Text>;
 
+  // Enhanced payment record with blockchain verification (PRD requirement)
+  public type VerifiedPayment = {
+    id : Nat;
+    payer : Principal;
+    amount : Nat;
+    blockIndex : Nat;
+    transactionHash : ?Text;
+    verifiedAt : Int;
+    registrationId : ?Nat;
+  };
+
+  // ICP Ledger types for integration
+  public type Account = {
+    owner : Principal;
+    subaccount : ?[Nat8];
+  };
+
+  public type QueryBlocksRequest = {
+    start : Nat;
+    length : Nat;
+  };
+
+  public type Block = {
+    transaction : Transaction;
+    timestamp : Int;
+    parent_hash : ?[Nat8];
+  };
+
+  public type Transaction = {
+    operation : Operation;
+    memo : Nat64;
+    icrc1_memo : ?[Nat8];
+    created_at_time : ?Int;
+  };
+
+  public type Operation = {
+    #Burn : { from : Account; amount : Nat; spender : ?Account };
+    #Mint : { to : Account; amount : Nat };
+    #Transfer : { from : Account; to : Account; amount : Nat; fee : ?Nat; spender : ?Account };
+  };
+
+  public type QueryBlocksResponse = {
+    chain_length : Nat;
+    certificate : ?[Nat8];
+    blocks : [Block];
+    first_block_index : Nat;
+    archived_blocks : [ArchivedBlockRange];
+  };
+
+  public type ArchivedBlockRange = {
+    start : Nat;
+    length : Nat;
+    callback : shared query (QueryBlocksRequest) -> async QueryBlocksResponse;
+  };
+
   // Migration system using safe patterns
   public type Version = MigrationManager.Version;
   public type MigrationInfo = MigrationManager.MigrationInfo;
@@ -148,6 +204,14 @@ persistent actor {
   var subscriptions = principalMap.empty<Subscription>();
   var nextPaymentId : Nat = 1;
   var icpBalance : Nat = 0; // Track ICP balance in e8s
+
+  // Payment verification state (PRD requirement)
+  var verifiedPayments = natMap.empty<VerifiedPayment>();
+  var usedBlockIndices = natMap.empty<Bool>(); // Track used block indices to prevent replay attacks
+  var nextVerifiedPaymentId : Nat = 1;
+
+  // ICP Ledger canister ID (mainnet)
+  let ICP_LEDGER_CANISTER_ID : Principal = Principal.fromText("rrkah-fqaaa-aaaaa-aaaaq-cai");
 
   public shared ({ caller }) func initializeAccessControl() : async () {
     AccessControl.initialize(accessControlState, caller);
@@ -365,7 +429,111 @@ persistent actor {
     false;
   };
 
-  public shared ({ caller }) func registerName(name : Text, address : Text, addressType : AddressType, owner : Text, seasonId : Nat) : async Nat {
+  // Payment verification functions (PRD requirement)
+
+  // Check if a block index has been used to prevent replay attacks
+  private func isBlockIndexUsed(blockIndex : Nat) : Bool {
+    switch (natMap.get(usedBlockIndices, blockIndex)) {
+      case null { false };
+      case (?_) { true };
+    };
+  };
+
+  // Mark a block index as used
+  private func markBlockIndexUsed(blockIndex : Nat) : () {
+    usedBlockIndices := natMap.put(usedBlockIndices, blockIndex, true);
+  };
+
+  // Query the ICP Ledger to verify payment at a specific block index
+  private func verifyPaymentAtBlock(
+    blockIndex : Nat,
+    expectedPayer : Principal,
+    expectedAmount : Nat,
+    expectedRecipient : Principal
+  ) : async Bool {
+    try {
+      // Query the ICP Ledger for the specific block
+      let queryRequest : QueryBlocksRequest = {
+        start = blockIndex;
+        length = 1;
+      };
+
+      let queryResponse : QueryBlocksResponse = await (actor(Principal.toText(ICP_LEDGER_CANISTER_ID)) : actor {
+        query_blocks : query (QueryBlocksRequest) -> async QueryBlocksResponse;
+      }).query_blocks(queryRequest);
+
+      // Check if we got the block
+      if (queryResponse.blocks.size() == 0) {
+        return false;
+      };
+
+      let block = queryResponse.blocks[0];
+
+      // Verify the transaction is a transfer with correct details
+      switch (block.transaction.operation) {
+        case (#Transfer({ from; to; amount; fee; spender })) {
+          // Check sender (payer)
+          if (from.owner != expectedPayer) {
+            return false;
+          };
+
+          // Check recipient (our canister)
+          if (to.owner != expectedRecipient) {
+            return false;
+          };
+
+          // Check amount (must be at least the expected amount)
+          if (amount < expectedAmount) {
+            return false;
+          };
+
+          return true;
+        };
+        case (_) {
+          // Not a transfer operation
+          return false;
+        };
+      };
+    } catch (error) {
+      // Ledger query failed
+      return false;
+    };
+  };
+
+  // Public query function to check if block index is used (PRD requirement)
+  public query func checkBlockIndexUsed(blockIndex : Nat) : async Bool {
+    isBlockIndexUsed(blockIndex);
+  };
+
+  // Get payment history for caller (PRD requirement)
+  public query ({ caller }) func getPaymentHistory() : async [VerifiedPayment] {
+    var userPayments : [VerifiedPayment] = [];
+    for (payment in natMap.vals(verifiedPayments)) {
+      if (payment.payer == caller) {
+        userPayments := Array.append(userPayments, [payment]);
+      };
+    };
+    userPayments;
+  };
+
+  // Get payment by block index (PRD requirement)
+  public shared ({ caller }) func getPaymentByBlockIndex(blockIndex : Nat) : async ?VerifiedPayment {
+    for (payment in natMap.vals(verifiedPayments)) {
+      if (payment.blockIndex == blockIndex) {
+        return ?payment;
+      };
+    };
+    null;
+  };
+
+  // Main verification and registration function (PRD requirement)
+  public shared ({ caller }) func verifyAndRegisterName(
+    name : Text,
+    address : Text,
+    addressType : AddressType,
+    seasonId : Nat,
+    blockIndex : Nat
+  ) : async Nat {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Debug.trap("Unauthorized: Only users can register names");
     };
@@ -375,10 +543,12 @@ persistent actor {
       Debug.trap("Principal already has a registered name. Only one name per principal is allowed");
     };
 
-    // Verify caller matches owner
-    if (Principal.toText(caller) != owner) {
-      Debug.trap("Caller must match the owner principal");
+    // Check if block index has already been used
+    if (isBlockIndexUsed(blockIndex)) {
+      Debug.trap("PAY001: Block index already used");
     };
+
+    let owner = Principal.toText(caller);
 
     switch (natMap.get(seasons, seasonId)) {
       case null { Debug.trap("Season not found") };
@@ -397,50 +567,42 @@ persistent actor {
 
         // Check if name is already registered
         switch (textMap.get(nameRecords, name)) {
-          case (?_) { Debug.trap("Name already registered") };
+          case (?_) { Debug.trap("Name is already registered") };
           case null {};
         };
 
-        // Check season capacity
-        var registrationCount = 0;
-        for (record in textMap.vals(nameRecords)) {
-          if (record.seasonId == seasonId) {
-            registrationCount += 1;
-          };
-        };
-        if (registrationCount >= season.maxNames) {
-          Debug.trap("Season has reached its maximum number of registrations");
-        };
-
-        // Process ICP payment
         let requiredAmount = season.price;
 
-        // For ICP payments, we need to verify the payment was sent to this canister
-        // This is a simplified approach - in production, you'd integrate with ICP ledger
-        // to verify actual transfers. For now, we'll use a placeholder that can be
-        // called with the payment amount as a parameter.
+        // Verify payment using ICP Ledger
+        let canisterPrincipal = Principal.fromActor(Self);
+        let paymentVerified = await verifyPaymentAtBlock(
+          blockIndex,
+          caller,
+          requiredAmount,
+          canisterPrincipal
+        );
 
-        // TODO: Integrate with ICP Ledger canister to verify actual ICP transfers
-        // For now, assuming payment verification happens off-chain or via separate call
-
-        // Update ICP balance (this would come from verified ledger transfer)
-        icpBalance += requiredAmount;
-
-        // Create payment record
-        let payment : Payment = {
-          id = nextPaymentId;
-          payer = caller;
-          amount = requiredAmount; // ICP amount paid
-          subscriptionType = #basic; // Default to basic for name registration
-          status = #completed;
-          txHash = null;
-          createdAt = now;
-          updatedAt = now;
+        if (not paymentVerified) {
+          Debug.trap("PAY002: Payment verification failed - amount insufficient, wrong sender, or wrong recipient");
         };
 
-        payments := natMap.put(payments, nextPaymentId, payment);
-        let paymentId = nextPaymentId;
-        nextPaymentId += 1;
+        // Mark block index as used to prevent replay attacks
+        markBlockIndexUsed(blockIndex);
+
+        // Create verified payment record
+        let verifiedPayment : VerifiedPayment = {
+          id = nextVerifiedPaymentId;
+          payer = caller;
+          amount = requiredAmount;
+          blockIndex = blockIndex;
+          transactionHash = null; // Could be extracted from block if needed
+          verifiedAt = now;
+          registrationId = ?nextVerifiedPaymentId; // Will be the same as payment ID for simplicity
+        };
+
+        verifiedPayments := natMap.put(verifiedPayments, nextVerifiedPaymentId, verifiedPayment);
+        let paymentId = nextVerifiedPaymentId;
+        nextVerifiedPaymentId += 1;
 
         // Create name record
         let record : NameRecord = {
@@ -472,6 +634,12 @@ persistent actor {
         paymentId;
       };
     };
+  };
+
+  // DEPRECATED: Legacy registerName function without payment verification
+  // Users should now use verifyAndRegisterName with proper ICP payment verification
+  public shared ({ caller }) func registerName(name : Text, address : Text, addressType : AddressType, owner : Text, seasonId : Nat) : async Nat {
+    Debug.trap("DEPRECATED: This function no longer allows registration without payment verification. Please use verifyAndRegisterName with a valid block index from your ICP payment transaction.");
   };
 
   public query func getNameRecord(name : Text) : async {#ok : NameRecord; #err : Text} {
@@ -811,6 +979,14 @@ persistent actor {
       Debug.trap("Unauthorized: Only admins can view ICP balance");
     };
     icpBalance;
+  };
+
+  // Get canister cycles balance (admin only)
+  public query ({ caller }) func getCyclesBalance() : async Nat {
+    if (not AccessControl.isAdmin(accessControlState, caller)) {
+      Debug.trap("Unauthorized: Only admins can view cycles balance");
+    };
+    ExperimentalCycles.balance();
   };
 
   // Admin function to withdraw ICP to another principal

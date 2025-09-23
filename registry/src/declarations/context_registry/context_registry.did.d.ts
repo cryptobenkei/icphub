@@ -80,6 +80,15 @@ export interface UserProfile { 'name' : string }
 export type UserRole = { 'admin' : null } |
   { 'user' : null } |
   { 'guest' : null };
+export interface VerifiedPayment {
+  'id' : bigint,
+  'transactionHash' : [] | [string],
+  'blockIndex' : bigint,
+  'payer' : Principal,
+  'amount' : bigint,
+  'registrationId' : [] | [bigint],
+  'verifiedAt' : bigint,
+}
 export interface Version {
   'major' : bigint,
   'minor' : bigint,
@@ -89,6 +98,7 @@ export interface _SERVICE {
   'activateSeason' : ActorMethod<[bigint], undefined>,
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
   'cancelSeason' : ActorMethod<[bigint], undefined>,
+  'checkBlockIndexUsed' : ActorMethod<[bigint], boolean>,
   'createSeason' : ActorMethod<
     [string, bigint, bigint, bigint, bigint, bigint, bigint],
     bigint
@@ -114,6 +124,7 @@ export interface _SERVICE {
   'getCanisterPrincipal' : ActorMethod<[], Principal>,
   'getCanisterVersion' : ActorMethod<[], Version>,
   'getCurrentTime' : ActorMethod<[], bigint>,
+  'getCyclesBalance' : ActorMethod<[], bigint>,
   'getFileReference' : ActorMethod<[string], FileReference>,
   'getIcpBalance' : ActorMethod<[], bigint>,
   'getMarkdown' : ActorMethod<[string], MarkdownContent>,
@@ -135,6 +146,8 @@ export interface _SERVICE {
       { 'err' : string }
   >,
   'getPayment' : ActorMethod<[bigint], [] | [Payment]>,
+  'getPaymentByBlockIndex' : ActorMethod<[bigint], [] | [VerifiedPayment]>,
+  'getPaymentHistory' : ActorMethod<[], Array<VerifiedPayment>>,
   'getSeason' : ActorMethod<[bigint], Season>,
   'getSubscriptionStats' : ActorMethod<
     [],
@@ -181,6 +194,10 @@ export interface _SERVICE {
   'validateSystemState' : ActorMethod<
     [],
     { 'valid' : boolean, 'issues' : Array<string> }
+  >,
+  'verifyAndRegisterName' : ActorMethod<
+    [string, string, AddressType, bigint, bigint],
+    bigint
   >,
   'verifyPayment' : ActorMethod<[string, bigint, Principal], boolean>,
   'withdrawIcp' : ActorMethod<[Principal, bigint], TransferResult>,

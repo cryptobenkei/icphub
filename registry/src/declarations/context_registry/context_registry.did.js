@@ -83,6 +83,15 @@ export const idlFactory = ({ IDL }) => {
     'address' : IDL.Text,
     'addressType' : AddressType,
   });
+  const VerifiedPayment = IDL.Record({
+    'id' : IDL.Nat,
+    'transactionHash' : IDL.Opt(IDL.Text),
+    'blockIndex' : IDL.Nat,
+    'payer' : IDL.Principal,
+    'amount' : IDL.Nat,
+    'registrationId' : IDL.Opt(IDL.Nat),
+    'verifiedAt' : IDL.Int,
+  });
   const Subscription = IDL.Record({
     'startTime' : IDL.Int,
     'endTime' : IDL.Int,
@@ -98,6 +107,7 @@ export const idlFactory = ({ IDL }) => {
     'activateSeason' : IDL.Func([IDL.Nat], [], []),
     'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
     'cancelSeason' : IDL.Func([IDL.Nat], [], []),
+    'checkBlockIndexUsed' : IDL.Func([IDL.Nat], [IDL.Bool], ['query']),
     'createSeason' : IDL.Func(
         [IDL.Text, IDL.Int, IDL.Int, IDL.Nat, IDL.Nat, IDL.Nat, IDL.Nat],
         [IDL.Nat],
@@ -132,6 +142,7 @@ export const idlFactory = ({ IDL }) => {
     'getCanisterPrincipal' : IDL.Func([], [IDL.Principal], ['query']),
     'getCanisterVersion' : IDL.Func([], [Version], ['query']),
     'getCurrentTime' : IDL.Func([], [IDL.Int], ['query']),
+    'getCyclesBalance' : IDL.Func([], [IDL.Nat], ['query']),
     'getFileReference' : IDL.Func([IDL.Text], [FileReference], ['query']),
     'getIcpBalance' : IDL.Func([], [IDL.Nat], ['query']),
     'getMarkdown' : IDL.Func([IDL.Text], [MarkdownContent], ['query']),
@@ -153,6 +164,12 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'getPayment' : IDL.Func([IDL.Nat], [IDL.Opt(Payment)], ['query']),
+    'getPaymentByBlockIndex' : IDL.Func(
+        [IDL.Nat],
+        [IDL.Opt(VerifiedPayment)],
+        [],
+      ),
+    'getPaymentHistory' : IDL.Func([], [IDL.Vec(VerifiedPayment)], ['query']),
     'getSeason' : IDL.Func([IDL.Nat], [Season], ['query']),
     'getSubscriptionStats' : IDL.Func(
         [],
@@ -222,6 +239,11 @@ export const idlFactory = ({ IDL }) => {
         [],
         [IDL.Record({ 'valid' : IDL.Bool, 'issues' : IDL.Vec(IDL.Text) })],
         ['query'],
+      ),
+    'verifyAndRegisterName' : IDL.Func(
+        [IDL.Text, IDL.Text, AddressType, IDL.Nat, IDL.Nat],
+        [IDL.Nat],
+        [],
       ),
     'verifyPayment' : IDL.Func(
         [IDL.Text, IDL.Nat, IDL.Principal],

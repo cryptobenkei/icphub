@@ -4,6 +4,16 @@ type Version =
    minor: nat;
    patch: nat;
  };
+type VerifiedPayment = 
+ record {
+   amount: nat;
+   blockIndex: nat;
+   id: nat;
+   payer: principal;
+   registrationId: opt nat;
+   transactionHash: opt text;
+   verifiedAt: int;
+ };
 type UserRole = 
  variant {
    admin;
@@ -118,6 +128,7 @@ service : {
   activateSeason: (seasonId: nat) -> ();
   assignCallerUserRole: (user: principal, role: UserRole) -> ();
   cancelSeason: (seasonId: nat) -> ();
+  checkBlockIndexUsed: (blockIndex: nat) -> (bool) query;
   createSeason: (name: text, startTime: int, endTime: int, maxNames: 
    nat, minNameLength: nat, maxNameLength: nat, price: nat) -> (nat);
   dropFileReference: (path: text) -> ();
@@ -144,6 +155,7 @@ service : {
   getCanisterPrincipal: () -> (principal) query;
   getCanisterVersion: () -> (Version) query;
   getCurrentTime: () -> (int) query;
+  getCyclesBalance: () -> (nat) query;
   getFileReference: (path: text) -> (FileReference) query;
   getIcpBalance: () -> (nat) query;
   getMarkdown: (name: text) -> (MarkdownContent) query;
@@ -163,6 +175,8 @@ service : {
                                     ok: NameRecord;
                                   }) query;
   getPayment: (paymentId: nat) -> (opt Payment) query;
+  getPaymentByBlockIndex: (blockIndex: nat) -> (opt VerifiedPayment);
+  getPaymentHistory: () -> (vec VerifiedPayment) query;
   getSeason: (seasonId: nat) -> (Season) query;
   getSubscriptionStats: () ->
    (record {
@@ -207,6 +221,8 @@ service : {
                                 issues: vec text;
                                 valid: bool;
                               }) query;
+  verifyAndRegisterName: (name: text, address: text, addressType:
+   AddressType, seasonId: nat, blockIndex: nat) -> (nat);
   verifyPayment: (txHash: text, amount: nat, payer: principal) -> (bool);
   withdrawIcp: (to: principal, amount: nat) -> (TransferResult);
 }

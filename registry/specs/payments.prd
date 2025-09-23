@@ -1,0 +1,338 @@
+# Product Requirements Document: ICP Payment Verification System
+
+## 1. Executive Summary
+
+### Problem Statement
+The current name registration system in the ICP Names Registry allows users to register names without actually sending ICP payments. The system has placeholder payment logic that only updates internal balances without verifying blockchain transactions.
+
+### Solution Overview
+Implement a secure two-step payment verification system that integrates with the ICP Ledger canister to verify actual ICP transfers before allowing name registration.
+
+### Success Metrics
+- 100% of name registrations require verified ICP payment
+- Zero false payment verifications
+- Payment verification completed within 5 seconds
+- Support for up to 1000 concurrent registrations
+
+## 2. Business Requirements
+
+### 2.1 Core Functionality
+- **Secure Payment Verification**: All name registrations must be backed by verified ICP transfers
+- **Fraud Prevention**: Prevent users from registering names without payment
+- **Audit Trail**: Maintain immutable record of all payments and registrations
+- **User Experience**: Seamless payment flow that doesn't confuse users
+
+### 2.2 Business Rules
+- Each name registration requires exactly the amount specified in the active season
+- Payments must be sent to the correct canister principal
+- Each blockchain transaction (block index) can only be used once
+- Failed payments should not result in name registration
+- Overpayments are not automatically refunded (manual admin process)
+
+## 3. Technical Requirements
+
+### 3.1 Backend Canister Changes
+
+#### 3.1.1 New Data Structures
+```motoko
+// Track used block indices to prevent replay attacks
+var usedBlockIndices : Set.Set<Nat> = Set.empty<Nat>();
+
+// Enhanced payment record with blockchain verification
+public type VerifiedPayment = {
+    id : Nat;
+    payer : Principal;
+    amount : Nat;
+    blockIndex : Nat;
+    transactionHash : ?Text;
+    verifiedAt : Int;
+    registrationId : ?Nat;
+};
+```
+
+#### 3.1.2 Core Functions to Implement
+
+**Primary Registration Function**
+```motoko
+public shared ({ caller }) func verifyAndRegisterName(
+    name: Text,
+    address: Text,
+    addressType: AddressType,
+    seasonId: Nat,
+    blockIndex: Nat
+) : async Nat
+```
+
+**Payment Verification Function**
+```motoko
+private func verifyPaymentAtBlock(
+    blockIndex: Nat,
+    expectedPayer: Principal,
+    expectedAmount: Nat
+) : async Bool
+```
+
+**Block Index Tracking**
+```motoko
+private func markBlockIndexUsed(blockIndex: Nat) : ()
+private func isBlockIndexUsed(blockIndex: Nat) : Bool
+```
+
+#### 3.1.3 ICP Ledger Integration
+- Query ICP Ledger canister: `rrkah-fqaaa-aaaaa-aaaaq-cai`
+- Use `query_blocks` method to retrieve transaction data
+- Parse transaction operations to extract transfer details
+- Verify sender, recipient, and amount match expectations
+
+#### 3.1.4 Error Handling
+- Invalid block index
+- Block index already used (replay attack prevention)
+- Payment amount mismatch
+- Wrong sender/recipient
+- Ledger query failures
+- Network timeouts
+
+### 3.2 Frontend Changes
+
+#### 3.2.1 Payment Flow Implementation
+1. **Payment Initiation**: User clicks register, system calculates exact amount
+2. **ICP Transfer**: Frontend calls ICP Ledger to send payment
+3. **Block Index Capture**: Store returned block index from transfer
+4. **Registration Call**: Pass block index to canister for verification
+5. **Success Handling**: Display success message and redirect to name management
+
+#### 3.2.2 User Interface Updates
+- **Payment Status Indicator**: Show payment processing stages
+- **Error Messages**: Clear feedback for payment failures
+- **Transaction History**: Display payment and registration details
+- **Loading States**: Appropriate spinners during async operations
+
+#### 3.2.3 Required Frontend Functions
+```typescript
+// Payment execution
+const executeIcpPayment = async (amount: bigint, recipient: Principal) => Promise<number>
+
+// Registration with verification
+const registerWithPayment = async (nameData: FormData, blockIndex: number) => Promise<void>
+
+// Payment status checking
+const checkPaymentStatus = async (blockIndex: number) => Promise<PaymentStatus>
+```
+
+### 3.3 Integration Requirements
+
+#### 3.3.1 ICP Ledger Canister
+- **Canister ID**: `rrkah-fqaaa-aaaaa-aaaaq-cai`
+- **Methods Used**:
+  - `icrc1_transfer` (for payments)
+  - `query_blocks` (for verification)
+  - `icrc1_balance_of` (for balance checks)
+
+#### 3.3.2 Internet Identity Integration
+- Maintain existing II authentication
+- Use authenticated principal for payment verification
+- Ensure payment sender matches registered user
+
+## 4. User Experience Requirements
+
+### 4.1 Registration Flow
+1. User fills out name registration form
+2. System displays payment amount and recipient
+3. User confirms payment intent
+4. Frontend executes ICP transfer automatically
+5. System verifies payment and processes registration
+6. User receives confirmation with transaction details
+
+### 4.2 Error Scenarios
+- **Payment Failed**: Clear error message with retry option
+- **Verification Failed**: Explain issue and provide support contact
+- **Network Issues**: Graceful handling with retry mechanisms
+- **Insufficient Balance**: Clear message about required amount
+
+### 4.3 Performance Requirements
+- Payment verification: < 5 seconds
+- Registration completion: < 10 seconds total
+- UI responsiveness: No blocking operations
+- Error recovery: Automatic retry for transient failures
+
+## 5. Security Requirements
+
+### 5.1 Payment Security
+- **Replay Attack Prevention**: Block index can only be used once
+- **Amount Verification**: Exact amount matching required
+- **Principal Verification**: Payment sender must match registered user
+- **Recipient Verification**: Payment must be sent to correct canister
+
+### 5.2 Data Integrity
+- **Immutable Records**: All verified payments stored permanently
+- **Audit Trail**: Complete history of verification attempts
+- **State Consistency**: Atomic operations for payment + registration
+- **Rollback Capability**: Failed registrations don't consume payments
+
+### 5.3 Access Control
+- **User Permissions**: Only authenticated users can register
+- **Admin Functions**: Payment verification logs accessible to admins
+- **Rate Limiting**: Prevent spam registration attempts
+
+## 6. Testing Requirements
+
+### 6.1 Unit Tests
+- Payment verification logic
+- Block index tracking
+- Error handling scenarios
+- Edge cases (overpayment, underpayment)
+
+### 6.2 Integration Tests
+- ICP Ledger communication
+- End-to-end registration flow
+- Payment failure scenarios
+- Network timeout handling
+
+### 6.3 Security Tests
+- Replay attack prevention
+- Payment amount tampering
+- Principal spoofing attempts
+- Invalid block index handling
+
+## 7. Implementation Plan
+
+### Phase 1: Backend Payment Verification (Week 1)
+- Implement `verifyPaymentAtBlock` function
+- Add block index tracking system
+- Create verified payment data structures
+- Basic error handling
+
+### Phase 2: Registration Integration (Week 2)
+- Update `registerName` to use payment verification
+- Implement `verifyAndRegisterName` function
+- Add payment record creation
+- Enhanced error messaging
+
+### Phase 3: Frontend Payment Flow (Week 3)
+- Implement ICP transfer functionality
+- Update registration form with payment flow
+- Add payment status indicators
+- Error handling and user feedback
+
+### Phase 4: Testing & Polish (Week 4)
+- Comprehensive testing suite
+- Performance optimization
+- Security audit
+- Documentation updates
+
+## 8. Success Criteria
+
+### 8.1 Functional Success
+- ✅ Zero registrations without verified payment
+- ✅ All payments correctly attributed to registrations
+- ✅ No double-spending of block indices
+- ✅ Proper error handling for all failure modes
+
+### 8.2 Performance Success
+- ✅ Payment verification completes in < 5 seconds
+- ✅ System handles 100+ concurrent registrations
+- ✅ UI remains responsive during payment flow
+- ✅ Error recovery works for network issues
+
+### 8.3 Security Success
+- ✅ No successful replay attacks
+- ✅ No payment amount manipulation
+- ✅ No unauthorized registrations
+- ✅ Complete audit trail maintained
+
+## 9. Risks & Mitigation
+
+### 9.1 Technical Risks
+- **ICP Ledger Downtime**: Implement retry logic and graceful degradation
+- **Network Latency**: Add timeout handling and user feedback
+- **State Inconsistency**: Use atomic operations and rollback mechanisms
+
+### 9.2 Security Risks
+- **Replay Attacks**: Comprehensive block index tracking
+- **Payment Manipulation**: Multi-point verification (amount, sender, recipient)
+- **DoS Attacks**: Rate limiting and resource management
+
+### 9.3 User Experience Risks
+- **Payment Confusion**: Clear UI and step-by-step guidance
+- **Error Recovery**: Automatic retry and manual support options
+- **Performance Issues**: Asynchronous operations and loading states
+
+## 10. Monitoring & Maintenance
+
+### 10.1 Key Metrics
+- Payment verification success rate
+- Average verification time
+- Failed payment attempts
+- Block index collision attempts
+
+### 10.2 Alerting
+- Payment verification failures > 5%
+- Verification time > 10 seconds
+- Suspected replay attacks
+- ICP Ledger communication failures
+
+### 10.3 Maintenance Tasks
+- Regular block index cleanup (if needed)
+- Payment record archival
+- Performance monitoring
+- Security audit reviews
+
+---
+
+## Appendix A: API Specifications
+
+### Backend API Changes
+
+```motoko
+// Replace existing registerName function
+public shared ({ caller }) func verifyAndRegisterName(
+    name: Text,
+    address: Text,
+    addressType: AddressType,
+    seasonId: Nat,
+    blockIndex: Nat
+) : async Nat
+
+// New payment verification utilities
+public query func isBlockIndexUsed(blockIndex: Nat) : async Bool
+public query ({ caller }) func getPaymentHistory() : async [VerifiedPayment]
+public shared ({ caller }) func getPaymentByBlockIndex(blockIndex: Nat) : async ?VerifiedPayment
+```
+
+### Frontend API Changes
+
+```typescript
+// New payment-enabled registration
+interface PaymentRegistrationData {
+  name: string;
+  address: string;
+  addressType: AddressType;
+  seasonId: number;
+  blockIndex: number;
+}
+
+// Payment execution result
+interface PaymentResult {
+  success: boolean;
+  blockIndex?: number;
+  error?: string;
+}
+```
+
+## Appendix B: Error Codes
+
+| Code | Description | Resolution |
+|------|-------------|------------|
+| PAY001 | Block index already used | Use new payment transaction |
+| PAY002 | Payment amount insufficient | Send exact required amount |
+| PAY003 | Wrong payment recipient | Send to correct canister |
+| PAY004 | Payment sender mismatch | Use authenticated principal |
+| PAY005 | Ledger query failed | Retry after network recovery |
+| PAY006 | Invalid block index | Verify transaction exists |
+| PAY007 | Payment verification timeout | Retry verification |
+
+---
+
+*Document Version: 1.0*  
+*Last Updated: September 2025*  
+*Next Review: October 2025*

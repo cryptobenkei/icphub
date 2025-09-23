@@ -101,6 +101,10 @@ interface ContextRegistryCanister {
   getAdminPrincipal: () => Promise<[Principal] | []>;
   getAllAdmins: () => Promise<Principal[]>;
   getAdminCount: () => Promise<bigint>;
+
+  // Financial
+  getIcpBalance: () => Promise<bigint>;
+  getCyclesBalance: () => Promise<bigint>;
 }
 
 class ContextRegistryManager {

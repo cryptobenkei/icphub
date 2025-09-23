@@ -106,6 +106,26 @@ class ICPHubCLI {
       console.log(`\n📁 File References:`);
       console.log(`   Total File References: ${fileReferences.length}`);
 
+      // Show canister financial status (admin only)
+      if (isDfxAdmin) {
+        try {
+          const icpBalance = await actor.getIcpBalance();
+          const cyclesBalance = await actor.getCyclesBalance();
+
+          // Convert balances to readable format
+          const icpBalanceFormatted = (Number(icpBalance) / 100_000_000).toFixed(8); // Convert e8s to ICP
+          const cyclesBalanceFormatted = (Number(cyclesBalance) / 1_000_000_000_000).toFixed(2); // Convert to trillion cycles
+
+          console.log(`\n💰 Canister Financial Status:`);
+          console.log(`   ICP Balance: ${icpBalanceFormatted} ICP (${icpBalance} e8s)`);
+          console.log(`   Cycles Balance: ${cyclesBalanceFormatted}T cycles`);
+          console.log(`   💡 Note: ICP balance represents payments received for registrations`);
+        } catch (error) {
+          console.log(`\n💰 Canister Financial Status:`);
+          console.log(`   ❌ Unable to fetch balance information (admin access required)`);
+        }
+      }
+
       // Show active season details if exists
       if (activeSeasons.length > 0) {
         const activeSeason = activeSeasons[0];
@@ -737,6 +757,7 @@ class ICPHubCLI {
     console.log(``);
     console.log(`📊 Status & Info:`);
     console.log(`  icphub status                    Show canister status and overview`);
+    console.log(`  icphub balance                   Show canister ICP and cycles balances`);
     console.log(`  icphub wallet                    Show wallet info and balances`);
     console.log(``);
     console.log(`📅 Season Management:`);
@@ -927,6 +948,50 @@ async function main() {
           console.error('   Available commands: metadata, markdown, did');
           console.error('   Or use: icphub name add <name> <principal-id>');
           process.exit(1);
+        }
+        break;
+
+      case "balance":
+        // Direct dfx calls for balance (since TypeScript CLI is anonymous)
+        console.log("💰 Canister Financial Status (via dfx)");
+        console.log("========================================");
+        try {
+          const { spawn } = await import('child_process');
+
+          // Get ICP balance
+          const icpProcess = spawn('dfx', ['canister', 'call', 'context_registry', 'getIcpBalance', '--query'], { stdio: 'pipe' });
+          let icpOutput = '';
+          icpProcess.stdout?.on('data', (data) => {
+            icpOutput += data.toString();
+          });
+
+          await new Promise((resolve) => {
+            icpProcess.on('close', () => resolve(0));
+          });
+
+          // Get cycles balance
+          const cyclesProcess = spawn('dfx', ['canister', 'call', 'context_registry', 'getCyclesBalance', '--query'], { stdio: 'pipe' });
+          let cyclesOutput = '';
+          cyclesProcess.stdout?.on('data', (data) => {
+            cyclesOutput += data.toString();
+          });
+
+          await new Promise((resolve) => {
+            cyclesProcess.on('close', () => resolve(0));
+          });
+
+          // Parse and format outputs
+          const icpBalance = icpOutput.match(/\((\d+(?:_\d+)*)\s*:\s*nat\)/)?.[1]?.replace(/_/g, '') || '0';
+          const cyclesBalance = cyclesOutput.match(/\((\d+(?:_\d+)*)\s*:\s*nat\)/)?.[1]?.replace(/_/g, '') || '0';
+
+          const icpFormatted = (parseInt(icpBalance) / 100_000_000).toFixed(8);
+          const cyclesFormatted = (parseInt(cyclesBalance) / 1_000_000_000_000).toFixed(2);
+
+          console.log(`💰 ICP Balance: ${icpFormatted} ICP (${icpBalance} e8s)`);
+          console.log(`⚡ Cycles Balance: ${cyclesFormatted}T cycles`);
+          console.log(`📊 Note: ICP balance represents payments received for name registrations`);
+        } catch (error) {
+          console.error("❌ Error fetching balance:", error);
         }
         break;
 

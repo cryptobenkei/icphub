@@ -25,6 +25,7 @@
     "test:migration": "tsx src/scripts/test-migration.ts",
     "icphub": "tsx bin/icphub.ts",
     "status": "npm run icphub status",
+    "balance": "npm run icphub balance",
     "wallet": "npm run icphub wallet",
     "seasons": "npm run icphub seasons",
     "season": "npm run icphub season",
