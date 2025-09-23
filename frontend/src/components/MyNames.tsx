@@ -677,6 +677,9 @@ function NameManagement({ record }: { record: any }) {
               </div>
               <div>
                 <span className="font-semibold text-white">@{record.name}.icp</span>
+                <div className="text-xs text-white/60 mb-1">
+                  {record.addressType === AddressType.canister ? 'Canister ID' : 'Principal ID'}:
+                </div>
                 <div className="text-sm text-white/80 font-mono">
                   {record.address}
                 </div>
