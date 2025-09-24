@@ -2,7 +2,8 @@ import type { Principal } from '@dfinity/principal';
 import type { ActorMethod } from '@dfinity/agent';
 import type { IDL } from '@dfinity/candid';
 
-export type AddressType = { 'canister' : null } |
+export type AddressType = { 'hub' : null } |
+  { 'canister' : null } |
   { 'identity' : null };
 export interface FileReference { 'hash' : string, 'path' : string }
 export interface MarkdownContent { 'content' : string, 'updatedAt' : bigint }
@@ -96,6 +97,7 @@ export interface Version {
 }
 export interface _SERVICE {
   'activateSeason' : ActorMethod<[bigint], undefined>,
+  'adminAddName' : ActorMethod<[string, string, AddressType], undefined>,
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
   'cancelSeason' : ActorMethod<[bigint], undefined>,
   'checkBlockIndexUsed' : ActorMethod<[bigint], boolean>,
@@ -120,8 +122,12 @@ export interface _SERVICE {
   'getAllPayments' : ActorMethod<[], Array<Payment>>,
   'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
   'getCallerUserRole' : ActorMethod<[], UserRole>,
+  'getCanisterAddresses' : ActorMethod<
+    [],
+    { 'accountId' : string, 'principalId' : Principal }
+  >,
   'getCanisterIcpAddress' : ActorMethod<[], string>,
-  'getCanisterPrincipal' : ActorMethod<[], Principal>,
+  'getCanisterPrincipalId' : ActorMethod<[], Principal>,
   'getCanisterVersion' : ActorMethod<[], Version>,
   'getCurrentTime' : ActorMethod<[], bigint>,
   'getCyclesBalance' : ActorMethod<[], bigint>,

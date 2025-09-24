@@ -122,10 +122,12 @@ type FileReference =
 type AddressType = 
  variant {
    canister;
+   hub;
    identity;
  };
 service : {
   activateSeason: (seasonId: nat) -> ();
+  adminAddName: (name: text, address: text, addressType: AddressType) -> ();
   assignCallerUserRole: (user: principal, role: UserRole) -> ();
   cancelSeason: (seasonId: nat) -> ();
   checkBlockIndexUsed: (blockIndex: nat) -> (bool) query;
@@ -151,8 +153,13 @@ service : {
   getAllPayments: () -> (vec Payment) query;
   getCallerUserProfile: () -> (opt UserProfile) query;
   getCallerUserRole: () -> (UserRole) query;
+  getCanisterAddresses: () ->
+   (record {
+      accountId: text;
+      principalId: principal;
+    }) query;
   getCanisterIcpAddress: () -> (text) query;
-  getCanisterPrincipal: () -> (principal) query;
+  getCanisterPrincipalId: () -> (principal) query;
   getCanisterVersion: () -> (Version) query;
   getCurrentTime: () -> (int) query;
   getCyclesBalance: () -> (nat) query;

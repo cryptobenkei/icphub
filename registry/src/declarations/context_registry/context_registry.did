@@ -122,10 +122,12 @@ type FileReference =
 type AddressType = 
  variant {
    canister;
+   hub;
    identity;
  };
 service : {
   activateSeason: (seasonId: nat) -> ();
+  adminAddName: (name: text, address: text, addressType: AddressType) -> ();
   assignCallerUserRole: (user: principal, role: UserRole) -> ();
   cancelSeason: (seasonId: nat) -> ();
   checkBlockIndexUsed: (blockIndex: nat) -> (bool) query;
@@ -151,13 +153,17 @@ service : {
   getAllPayments: () -> (vec Payment) query;
   getCallerUserProfile: () -> (opt UserProfile) query;
   getCallerUserRole: () -> (UserRole) query;
+  getCanisterAddresses: () ->
+   (record {
+      accountId: text;
+      principalId: principal;
+    }) query;
   getCanisterIcpAddress: () -> (text) query;
-  getCanisterPrincipal: () -> (principal) query;
+  getCanisterPrincipalId: () -> (principal) query;
   getCanisterVersion: () -> (Version) query;
   getCurrentTime: () -> (int) query;
   getCyclesBalance: () -> (nat) query;
   getFileReference: (path: text) -> (FileReference) query;
-  getIcpBalance: () -> (nat) query;
   getMarkdown: (name: text) -> (MarkdownContent) query;
   getMarkdownContent: (name: text) ->
    (variant {
@@ -184,7 +190,6 @@ service : {
       basicSubscriptions: nat;
       enterpriseSubscriptions: nat;
       premiumSubscriptions: nat;
-      totalRevenue: nat;
       totalSubscriptions: nat;
     }) query;
   getUpgradeInfo: () ->
@@ -198,7 +203,7 @@ service : {
   getUserSubscription: (user: principal) -> (opt Subscription) query;
   hasActiveSubscription: (user: principal) -> (bool) query;
   hasRegisteredName: (owner: text) -> (bool) query;
-  initializeAccessControl: () -> ();
+  initializeAccessControl: (canisterId: principal) -> ();
   isCallerAdmin: () -> (bool) query;
   listFileReferences: () -> (vec FileReference) query;
   listNameRecords: () -> (vec NameRecord) query;
@@ -210,9 +215,10 @@ service : {
       logs: vec text;
       success: bool;
     });
+  queryLedgerBalance: () -> (nat);
   registerFileReference: (path: text, hash: text) -> ();
-  registerName: (name: text, address: text, addressType: AddressType, owner:
-   text, seasonId: nat) -> (nat);
+  registerName: (_name: text, _address: text, _addressType: AddressType,
+   _owner: text, _seasonId: nat) -> (nat);
   saveCallerUserProfile: (profile: UserProfile) -> ();
   saveMarkdown: (name: text, content: text) -> ();
   saveMetadata: (name: text, title: text, description: text, image: text) ->
@@ -223,6 +229,6 @@ service : {
                               }) query;
   verifyAndRegisterName: (name: text, address: text, addressType:
    AddressType, seasonId: nat, blockIndex: nat) -> (nat);
-  verifyPayment: (txHash: text, amount: nat, payer: principal) -> (bool);
+  verifyPayment: (_txHash: text, _amount: nat, _payer: principal) -> (bool);
   withdrawIcp: (to: principal, amount: nat) -> (TransferResult);
 }

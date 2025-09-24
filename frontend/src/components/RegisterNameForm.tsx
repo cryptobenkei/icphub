@@ -72,12 +72,21 @@ export function RegisterNameForm() {
   const { data: userNames } = useGetUserNames();
   const { data: canisterPrincipal } = useGetCanisterPrincipal();
   const addressType = watch('addressType');
+  const nameValue = watch('name');
 
   // Extract active season from activeSeasonInfo
   const activeSeason = activeSeasonInfo?.season;
 
   // Check if user already has any registered name (one name per principal globally)
   const hasRegisteredName = userNames && userNames.length > 0;
+
+  // Validate name length against season limits
+  const isNameValid = () => {
+    if (!nameValue || !activeSeason) return false;
+    const nameLength = nameValue.length;
+    return nameLength >= Number(activeSeason.minNameLength) &&
+           nameLength <= Number(activeSeason.maxNameLength);
+  };
 
   // Update address field when principal ID changes and address type is identity
   useEffect(() => {
@@ -261,6 +270,13 @@ export function RegisterNameForm() {
               {errors.name && (
                 <p className="text-sm text-destructive">{errors.name.message}</p>
               )}
+              {nameValue && activeSeason && (
+                <p className={`text-xs ${isNameValid() ? 'text-green-600' : 'text-muted-foreground'}`}>
+                  {nameValue.length} / {activeSeason.minNameLength.toString()}-{activeSeason.maxNameLength.toString()} characters
+                  {!isNameValid() && nameValue.length < Number(activeSeason.minNameLength) && ' (too short)'}
+                  {!isNameValid() && nameValue.length > Number(activeSeason.maxNameLength) && ' (too long)'}
+                </p>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -361,7 +377,8 @@ export function RegisterNameForm() {
               type="submit"
               disabled={
                 paymentVerificationMutation.isPending ||
-                !canisterPrincipal
+                !canisterPrincipal ||
+                !isNameValid()
               }
               className="w-full"
             >

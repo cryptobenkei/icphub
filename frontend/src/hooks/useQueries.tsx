@@ -7,6 +7,7 @@ import { Actor, HttpAgent } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
 import { loadConfig } from '../config';
 import { IDL } from '@dfinity/candid';
+import { AccountIdentifier } from '@dfinity/ledger-icp';
 
 // Utility function to convert backend season ID to user-friendly season number
 export function getSeasonNumber(seasonId: bigint): number {
@@ -103,7 +104,7 @@ export function useGetCanisterPrincipal() {
     queryKey: ['canisterPrincipal'],
     queryFn: async () => {
       if (!actor) throw new Error('Actor not available');
-      const principal = await actor.getCanisterPrincipal();
+      const principal = await actor.getCanisterPrincipalId();
       return principal.toString();
     },
     enabled: !!actor && !isFetching,
@@ -528,14 +529,20 @@ export function usePaymentVerificationAndRegister() {
       // Standard ICP fee (0.0001 ICP)
       const fee = 10000n;
 
-      // Step 1: Execute ICP Payment using Plug Wallet
+      // Step 1: Convert Principal to Account ID (proper ICP ledger format)
+      const canisterAccountId = AccountIdentifier.fromPrincipal({
+        principal: Principal.fromText(canisterPrincipal),
+        subAccount: undefined // Use default subaccount
+      });
+
+      // Step 2: Execute ICP Payment using Plug Wallet
       if (!window.ic?.plug) {
         throw new Error('Plug Wallet not available. Please install and connect Plug Wallet.');
       }
 
-      // Use Plug Wallet's requestTransfer method
+      // Use Plug Wallet's requestTransfer method with proper Account ID
       const transferResult = await window.ic.plug.requestTransfer({
-        to: canisterPrincipal,
+        to: canisterAccountId.toHex(), // Convert to hex string format for Plug Wallet
         amount: Number(amount),
         opts: {
           fee: Number(fee),
@@ -554,10 +561,10 @@ export function usePaymentVerificationAndRegister() {
       // For Plug Wallet, the result should contain the block index directly
       const blockIndex = transferResult.height || transferResult;
 
-      // Step 2: Wait a moment for the transaction to be processed
+      // Step 3: Wait a moment for the transaction to be processed
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // Step 3: Call verifyAndRegisterName with the block index
+      // Step 4: Call verifyAndRegisterName with the block index
       const paymentId = await actor.verifyAndRegisterName(
         name,
         address,

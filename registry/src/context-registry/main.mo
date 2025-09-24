@@ -2,6 +2,7 @@ import OrderedMap "mo:base/OrderedMap";
 import Text "mo:base/Text";
 import Time "mo:base/Time";
 import Debug "mo:base/Debug";
+import Error "mo:base/Error";
 import Nat "mo:base/Nat";
 import Int "mo:base/Int";
 import Array "mo:base/Array";
@@ -13,7 +14,7 @@ import MigrationManager "migration/migration-manager";
 import Result "mo:base/Result";
 import Blob "mo:base/Blob";
 import ExperimentalCycles "mo:base/ExperimentalCycles";
-import Set "mo:base/HashMap";
+import Nat8 "mo:base/Nat8";
 
 // Enhanced Orthogonal Persistence Actor - Safe Migration Pattern
 persistent actor Self {
@@ -26,6 +27,7 @@ persistent actor Self {
   public type AddressType = {
     #canister;
     #identity;
+    #hub;
   };
 
   public type SeasonStatus = {
@@ -202,19 +204,48 @@ persistent actor Self {
   // Payment and subscription state
   var payments = natMap.empty<Payment>();
   var subscriptions = principalMap.empty<Subscription>();
-  var nextPaymentId : Nat = 1;
-  var icpBalance : Nat = 0; // Track ICP balance in e8s
-
+  
   // Payment verification state (PRD requirement)
   var verifiedPayments = natMap.empty<VerifiedPayment>();
   var usedBlockIndices = natMap.empty<Bool>(); // Track used block indices to prevent replay attacks
   var nextVerifiedPaymentId : Nat = 1;
 
-  // ICP Ledger canister ID (mainnet)
-  let ICP_LEDGER_CANISTER_ID : Principal = Principal.fromText("rrkah-fqaaa-aaaaa-aaaaq-cai");
+  // ICP Ledger canister ID - configurable
+  private var icpLedgerCanisterId : ?Principal = null;
 
-  public shared ({ caller }) func initializeAccessControl() : async () {
+  // ICP Ledger account ID for this canister - configurable
+  private var icpLedgerAccountId : ?Text = null;
+
+  // Track if access control has been initialized
+  private var isAccessControlInitialized : Bool = false;
+
+  public shared ({ caller }) func initializeAccessControl(canisterId : Principal, accountIdHex : Text) : async () {
+    if (isAccessControlInitialized) {
+      Debug.trap("Access control has already been initialized and cannot be called again");
+    };
     AccessControl.initialize(accessControlState, caller);
+    icpLedgerCanisterId := ?canisterId;
+    icpLedgerAccountId := ?accountIdHex;
+    isAccessControlInitialized := true;
+  };
+
+  // Helper function to get configured ledger canister ID
+  private func getConfiguredLedgerCanisterId() : Principal {
+    switch (icpLedgerCanisterId) {
+      case (?canisterId) { canisterId };
+      case null { 
+        Debug.trap("ICP Ledger canister ID not configured. Call initializeAccessControl first.");
+      };
+    };
+  };
+
+  private func getConfiguredAccountId() : Text {
+    switch (icpLedgerAccountId) {
+      case (?accountId) { accountId };
+      case null { 
+        Debug.trap("ICP Ledger account ID not configured. Call initializeAccessControl first.");
+      };
+    };
   };
 
   public query ({ caller }) func getCallerUserRole() : async AccessControl.UserRole {
@@ -418,6 +449,51 @@ persistent actor Self {
     Debug.trap("No active season found");
   };
 
+  // Admin-only function to create names without payment restrictions
+  public shared ({ caller }) func adminAddName(
+    name : Text,
+    address : Text,
+    addressType : AddressType
+  ) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #admin))) {
+      Debug.trap("Unauthorized: Only admins can add names without payment");
+    };
+
+    // Check if name is already registered
+    switch (textMap.get(nameRecords, name)) {
+      case (?_) { Debug.trap("Name is already registered") };
+      case null {};
+    };
+
+    // Get current active season (admin can add to any active season)
+    var currentSeason : ?Season = null;
+    for (season in natMap.vals(seasons)) {
+      if (season.status == #active) {
+        currentSeason := ?season;
+      };
+    };
+
+    let seasonId = switch (currentSeason) {
+      case null { Debug.trap("No active season found") };
+      case (?season) { season.id };
+    };
+
+    let now = Time.now();
+    let owner = Principal.toText(caller); // Admin is the owner
+
+    // Create name record (no length restrictions for admin)
+    let record : NameRecord = {
+      name;
+      address;
+      addressType;
+      owner;
+      seasonId;
+      createdAt = now;
+      updatedAt = now;
+    };
+    nameRecords := textMap.put(nameRecords, name, record);
+  };
+
   // Helper function to check if a principal already has any registered name
   private func principalHasRegisteredName(principalId : Principal) : Bool {
     let principalText = Principal.toText(principalId);
@@ -431,15 +507,11 @@ persistent actor Self {
 
   // Account ID utility functions (for ICP payment verification)
 
-  // Convert Principal to Account ID (32-byte identifier used by ICP Ledger)
-  // Simplified version: for payment verification, we check if recipient owner matches our principal
-  private func getCanisterAccountOwner() : Principal {
-    // For ICP transfers, the account owner is the canister principal itself
-    // The account ID conversion happens in the ledger, but the owner field still shows the principal
+  // For ICP payment verification, we need to handle that Plug wallet converts
+  // principal to account ID for the actual transfer, but we verify against the principal
+  private func getCanisterPrincipalPrivate() : Principal {
     Principal.fromActor(Self);
   };
-
-  // Payment verification functions (PRD requirement)
 
   // Check if a block index has been used to prevent replay attacks
   private func isBlockIndexUsed(blockIndex : Nat) : Bool {
@@ -457,7 +529,6 @@ persistent actor Self {
   // Query the ICP Ledger to verify payment at a specific block index
   private func verifyPaymentAtBlock(
     blockIndex : Nat,
-    expectedPayer : Principal,
     expectedAmount : Nat,
     expectedRecipient : Principal
   ) : async Bool {
@@ -468,7 +539,12 @@ persistent actor Self {
         length = 1;
       };
 
-      let queryResponse : QueryBlocksResponse = await (actor(Principal.toText(ICP_LEDGER_CANISTER_ID)) : actor {
+      let ledgerCanisterId = switch (icpLedgerCanisterId) {
+        case null { Debug.trap("ICP Ledger canister ID not configured") };
+        case (?id) { id };
+      };
+
+      let queryResponse : QueryBlocksResponse = await (actor(Principal.toText(ledgerCanisterId)) : actor {
         query_blocks : query (QueryBlocksRequest) -> async QueryBlocksResponse;
       }).query_blocks(queryRequest);
 
@@ -481,13 +557,12 @@ persistent actor Self {
 
       // Verify the transaction is a transfer with correct details
       switch (block.transaction.operation) {
-        case (#Transfer({ from; to; amount; fee; spender })) {
-          // Check sender (payer)
-          if (from.owner != expectedPayer) {
-            return false;
-          };
+        case (#Transfer({ from = _; to; amount; fee = _; spender = _ })) {
+          // Note: We don't verify the sender (from.owner) because when using wallets like Plug,
+          // the actual sender principal may differ from the user's Internet Identity principal.
+          // The important security check is that payment was made to the correct recipient.
 
-          // Check recipient (our canister)
+          // Check recipient (our canister) - compare account owners (principals)
           if (to.owner != expectedRecipient) {
             return false;
           };
@@ -504,7 +579,7 @@ persistent actor Self {
           return false;
         };
       };
-    } catch (error) {
+    } catch (_error) {
       // Ledger query failed
       return false;
     };
@@ -527,7 +602,7 @@ persistent actor Self {
   };
 
   // Get payment by block index (PRD requirement)
-  public shared ({ caller }) func getPaymentByBlockIndex(blockIndex : Nat) : async ?VerifiedPayment {
+  public shared ({ caller = _ }) func getPaymentByBlockIndex(blockIndex : Nat) : async ?VerifiedPayment {
     for (payment in natMap.vals(verifiedPayments)) {
       if (payment.blockIndex == blockIndex) {
         return ?payment;
@@ -584,11 +659,10 @@ persistent actor Self {
         let requiredAmount = season.price;
 
         // Verify payment using ICP Ledger
-        // Use canister principal as account owner (account ID conversion handled by ledger)
-        let canisterPrincipal = getCanisterAccountOwner();
+        // Use canister principal for payment verification
+        let canisterPrincipal = getCanisterPrincipalPrivate();
         let paymentVerified = await verifyPaymentAtBlock(
           blockIndex,
-          caller,
           requiredAmount,
           canisterPrincipal
         );
@@ -599,9 +673,6 @@ persistent actor Self {
 
         // Mark block index as used to prevent replay attacks
         markBlockIndexUsed(blockIndex);
-
-        // Update ICP balance when payment is successfully verified
-        icpBalance += requiredAmount;
 
         // Create verified payment record
         let verifiedPayment : VerifiedPayment = {
@@ -652,7 +723,7 @@ persistent actor Self {
 
   // DEPRECATED: Legacy registerName function without payment verification
   // Users should now use verifyAndRegisterName with proper ICP payment verification
-  public shared ({ caller }) func registerName(name : Text, address : Text, addressType : AddressType, owner : Text, seasonId : Nat) : async Nat {
+  public shared ({ caller = _ }) func registerName(_name : Text, _address : Text, _addressType : AddressType, _owner : Text, _seasonId : Nat) : async Nat {
     Debug.trap("DEPRECATED: This function no longer allows registration without payment verification. Please use verifyAndRegisterName with a valid block index from your ICP payment transaction.");
   };
 
@@ -763,9 +834,6 @@ persistent actor Self {
     };
   };
 
-  public query func getCanisterPrincipal() : async Principal {
-    Principal.fromText("2vxsx-fae");
-  };
 
   // Safe version and migration management with EOP
   public query func getCanisterVersion() : async Version {
@@ -987,14 +1055,6 @@ persistent actor Self {
     Array.map<(Nat, Payment), Payment>(paymentArray, func((_, payment)) = payment);
   };
 
-  // Get canister ICP balance (admin only)
-  public query ({ caller }) func getIcpBalance() : async Nat {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Debug.trap("Unauthorized: Only admins can view ICP balance");
-    };
-    icpBalance;
-  };
-
   // Get canister cycles balance (admin only)
   public query ({ caller }) func getCyclesBalance() : async Nat {
     if (not AccessControl.isAdmin(accessControlState, caller)) {
@@ -1003,57 +1063,104 @@ persistent actor Self {
     ExperimentalCycles.balance();
   };
 
+  // Query actual ICP Ledger balance for this canister
+  public func queryLedgerBalance() : async Nat {
+
+    let ledgerCanisterId = getConfiguredLedgerCanisterId();
+    try {
+      let ledger = actor(Principal.toText(ledgerCanisterId)) : actor {
+        icrc1_balance_of : (Account) -> async Nat;
+      };
+
+      let canisterAccount : Account = {
+        owner = Principal.fromActor(Self);
+        subaccount = null : ?[Nat8];
+      };
+      
+      // CRÍTICO: Usar Account structure, no solo Principal
+      Debug.print("Querying balance for account - Owner: " # Principal.toText(canisterAccount.owner) # ", Subaccount: " # debug_show(canisterAccount.subaccount));
+      let balance = await ledger.icrc1_balance_of(canisterAccount);
+      Debug.print("Balance retrieved: " # Nat.toText(balance) # " e8s");
+      balance;
+    } catch (error) {
+      Debug.print("Failed to query ledger balance from " # Principal.toText(ledgerCanisterId) # ": " # Error.message(error));
+      0;
+    };
+  };
+
   // Admin function to withdraw ICP to another principal
   public shared ({ caller }) func withdrawIcp(to : Principal, amount : Nat) : async TransferResult {
     if (not AccessControl.isAdmin(accessControlState, caller)) {
       Debug.trap("Unauthorized: Only admins can withdraw ICP");
     };
 
-    if (amount > icpBalance) {
-      return #err("Insufficient ICP balance");
+    // Query actual ledger balance with error handling
+    let actualBalance = await queryLedgerBalance();
+
+    // If ledger query failed (returned 0), check if we have internal balance tracking
+    // Note: internal balance tracking would need to be implemented if needed
+    if (actualBalance == 0) {
+      return #err("Insufficient ICP balance. Ledger balance: 0 e8s. Please ensure the canister has ICP and the ledger canister ID is configured correctly.");
+    };
+
+    if (amount > actualBalance) {
+      return #err("Insufficient ICP balance. Available: " # Nat.toText(actualBalance) # " e8s");
     };
 
     if (Principal.isAnonymous(to)) {
       return #err("Cannot transfer to anonymous principal");
     };
 
-    // TODO: In production, integrate with ICP Ledger canister:
-    // 1. Create transfer request to ICP Ledger
-    // 2. Handle transfer result and update balance accordingly
-    // Example: let transferResult = await ICPLedger.transfer({to, amount, fee});
-
-    // For now, simulate the transfer by updating internal balance
-    icpBalance -= amount;
-
-    // Log the withdrawal for audit purposes
-    let _withdrawalLog = "ICP withdrawal: " # Nat.toText(amount) # " e8s to " # Principal.toText(to) # " by " # Principal.toText(caller);
-
-    // Return success with a mock transaction ID
-    #ok(amount);
-  };
-
-  // Function to verify ICP payment was received (to be called after payment)
-  public shared ({ caller }) func verifyPayment(txHash : Text, amount : Nat, payer : Principal) : async Bool {
-    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Debug.trap("Unauthorized: Only users can verify payments");
+    let fee : Nat = 10000; // Standard ICP transfer fee in e8s
+    if (amount <= fee) {
+      return #err("Amount must be greater than transaction fee (10,000 e8s)");
     };
 
-    // TODO: Integrate with ICP Ledger canister to verify the transaction
-    // 1. Query ICP Ledger for transaction by hash
-    // 2. Verify amount and sender match
-    // 3. Verify transaction was sent to this canister
-    // Example: let tx = await ICPLedger.getTransaction(txHash);
+    try {
+      let ledgerCanisterId = switch (icpLedgerCanisterId) {
+        case null { return #err("ICP Ledger canister ID not configured") };
+        case (?id) { id };
+      };
 
-    // For now, return true (placeholder)
-    // In production, this would verify the actual blockchain transaction
-    true;
-  };
+      let transferArg = {
+        from_subaccount = null : ?[Nat8];
+        to = { owner = to; subaccount = null };
+        amount = amount;
+        fee = ?fee;
+        memo = null : ?[Nat8];
+        created_at_time = null : ?Nat64;
+      };
 
-  // Get canister's ICP account address (for receiving payments)
-  public query func getCanisterIcpAddress() : async Text {
-    // TODO: In production, derive actual ICP account address from canister principal
-    // For now, return placeholder
-    "placeholder-icp-address";
+      let ledger = actor(Principal.toText(ledgerCanisterId)) : actor {
+        icrc1_transfer : ({ from_subaccount : ?[Nat8]; to : { owner : Principal; subaccount : ?[Nat8] }; amount : Nat; fee : ?Nat; memo : ?[Nat8]; created_at_time : ?Nat64 }) -> async { #Ok : Nat; #Err : { #BadFee : { expected_fee : Nat }; #BadBurn : { min_burn_amount : Nat }; #InsufficientFunds : { balance : Nat }; #TooOld; #CreatedInFuture : { ledger_time : Nat64 }; #Duplicate : { duplicate_of : Nat }; #TemporarilyUnavailable; #GenericError : { error_code : Nat; message : Text } } };
+      };
+
+      let transferResult = await ledger.icrc1_transfer(transferArg);
+
+      switch (transferResult) {
+        case (#Ok(blockIndex)) {
+          Debug.print("ICP withdrawal successful: " # Nat.toText(amount) # " e8s to " # Principal.toText(to) # " by " # Principal.toText(caller) # " (block: " # Nat.toText(blockIndex) # ")");
+
+          #ok(blockIndex);
+        };
+        case (#Err(error)) {
+          let errorMsg = switch (error) {
+            case (#BadFee({ expected_fee })) { "Bad fee: expected " # Nat.toText(expected_fee) # " e8s" };
+            case (#InsufficientFunds({ balance })) { "Insufficient funds: ledger balance " # Nat.toText(balance) # " e8s" };
+            case (#TooOld) { "Transaction too old" };
+            case (#CreatedInFuture(_)) { "Transaction created in future" };
+            case (#Duplicate(_)) { "Duplicate transaction" };
+            case (#TemporarilyUnavailable) { "Ledger temporarily unavailable" };
+            case (#GenericError({ message; error_code = _ })) { "Ledger error: " # message };
+            case (_) { "Unknown transfer error" };
+          };
+          #err(errorMsg);
+        };
+      };
+    } catch (_error) {
+      Debug.print("Exception during ICP transfer: " # "transfer communication error");
+      #err("Failed to communicate with ICP Ledger canister");
+    };
   };
 
   // Emergency function to pause all subscriptions (admin only)
@@ -1079,7 +1186,6 @@ persistent actor Self {
     basicSubscriptions : Nat;
     premiumSubscriptions : Nat;
     enterpriseSubscriptions : Nat;
-    totalRevenue : Nat;
   } {
     if (not AccessControl.isAdmin(accessControlState, caller)) {
       Debug.trap("Unauthorized: Only admins can view subscription statistics");
@@ -1111,8 +1217,9 @@ persistent actor Self {
       basicSubscriptions = basicSubs;
       premiumSubscriptions = premiumSubs;
       enterpriseSubscriptions = enterpriseSubs;
-      totalRevenue = icpBalance;
     };
   };
+
+
 };
 

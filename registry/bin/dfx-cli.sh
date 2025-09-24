@@ -23,6 +23,10 @@ PROD_HOST="https://ic0.app"
 LOCAL_CANISTER_ID="uxrrr-q7777-77774-qaaaq-cai"  # Default from .env
 PROD_CANISTER_ID="gpddv-xaaaa-aaaai-atlua-cai"
 
+# ICP Ledger canister IDs
+LOCAL_ICP_LEDGER_ID="rrkah-fqaaa-aaaaa-aaaaq-cai"  # Local ledger (usually same as mainnet)
+PROD_ICP_LEDGER_ID="rrkah-fqaaa-aaaaa-aaaaq-cai"   # Mainnet ICP Ledger
+
 # Functions
 print_header() {
     echo -e "${BLUE}🏢 ICPHub DFX CLI - Direct Canister Interface${NC}"
@@ -47,13 +51,17 @@ show_environment() {
         echo -e "${RED}🌐 ENVIRONMENT: PRODUCTION${NC}"
         echo -e "${RED}📍 CANISTER: $PROD_CANISTER_ID${NC}"
         echo -e "${RED}🌍 HOST: $PROD_HOST${NC}"
+        echo -e "${RED}💰 ICP LEDGER: $PROD_ICP_LEDGER_ID${NC}"
         CANISTER_ID="$PROD_CANISTER_ID"
+        ICP_LEDGER_ID="$PROD_ICP_LEDGER_ID"
         NETWORK="ic"
     else
         echo -e "${GREEN}🏠 ENVIRONMENT: LOCAL${NC}"
         echo -e "${GREEN}📍 CANISTER: $LOCAL_CANISTER_ID${NC}"
         echo -e "${GREEN}🌍 HOST: $LOCAL_HOST${NC}"
+        echo -e "${GREEN}💰 ICP LEDGER: $LOCAL_ICP_LEDGER_ID${NC}"
         CANISTER_ID="$LOCAL_CANISTER_ID"
+        ICP_LEDGER_ID="$LOCAL_ICP_LEDGER_ID"
         NETWORK="local"
     fi
     echo ""
@@ -136,13 +144,20 @@ cmd_get_balances() {
     dfx canister --network "$NETWORK" call context_registry getCyclesBalance --query
 }
 
+cmd_get_ledger_config() {
+    echo -e "${BLUE}💰 ICP Ledger Configuration${NC}"
+    echo "============================"
+    dfx canister --network "$NETWORK" call context_registry getIcpLedgerCanisterId --query
+}
+
 # Write operations (require confirmation)
 cmd_init_access_control() {
     confirm_write_operation "Initialize Access Control (first caller becomes admin)"
     echo -e "${BLUE}🔧 Initializing Access Control${NC}"
     echo "==============================="
-    dfx canister --network "$NETWORK" call context_registry initializeAccessControl
-    echo -e "${GREEN}✅ Access control initialized${NC}"
+    echo -e "${CYAN}Setting ICP Ledger canister ID: $ICP_LEDGER_ID${NC}"
+    dfx canister --network "$NETWORK" call context_registry initializeAccessControl "(principal \"$ICP_LEDGER_ID\")"
+    echo -e "${GREEN}✅ Access control initialized with ICP Ledger: $ICP_LEDGER_ID${NC}"
 }
 
 cmd_create_season() {
@@ -276,6 +291,7 @@ cmd_help() {
     echo "  $0 names                        List all name records"
     echo "  $0 name <name>                  Get name record details"
     echo "  $0 balances                     Show ICP and cycles balances"
+    echo "  $0 ledger-config                Show configured ICP Ledger canister ID"
     echo ""
     echo -e "${CYAN}✏️  Write Operations (Update - requires confirmation):${NC}"
     echo "  $0 init                         Initialize access control"
@@ -335,6 +351,9 @@ main() {
             ;;
         "balances")
             cmd_get_balances
+            ;;
+        "ledger-config")
+            cmd_get_ledger_config
             ;;
         "init")
             cmd_init_access_control

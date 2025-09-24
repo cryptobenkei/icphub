@@ -6,6 +6,7 @@ import { Principal } from "@dfinity/principal";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import readline from "readline";
 
 // Load environment variables silently (suppress all dotenv logs)
 dotenv.config({
@@ -44,6 +45,21 @@ function saveConfig(config: CLIConfig): void {
   } catch (error) {
     console.warn(`⚠️  Could not save config: ${error}`);
   }
+}
+
+// Helper function to prompt for user input
+function promptUser(question: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
 }
 
 class ICPHubCLI {
@@ -198,8 +214,37 @@ class ICPHubCLI {
         const { spawn } = await import('child_process');
         const network = this.currentEnv === 'production' ? 'ic' : 'local';
 
-        // Get ICP balance
-        const icpProcess = spawn('dfx', ['canister', '--network', network, 'call', 'context_registry', 'getIcpBalance', '--query'], { stdio: 'pipe' });
+        // Get canister principal and derive account ID
+        let canisterAccountId: string;
+        if (network === 'ic') {
+          canisterAccountId = '9874f67fa5e6dad2015090fe78a84a17497587359e6c0c181adb96400ba76830';  // Production account ID
+        } else {
+          // For local, get the canister principal and derive account ID
+          const principalProcess = spawn('dfx', ['canister', 'id', 'context_registry'], { stdio: 'pipe' });
+          let principalOutput = '';
+          principalProcess.stdout?.on('data', (data) => {
+            principalOutput += data.toString();
+          });
+          await new Promise((resolve) => {
+            principalProcess.on('close', () => resolve(0));
+          });
+
+          const canisterPrincipal = principalOutput.trim();
+
+          // Get account ID from principal
+          const accountIdProcess = spawn('dfx', ['ledger', 'account-id', '--of-principal', canisterPrincipal], { stdio: 'pipe' });
+          let accountIdOutput = '';
+          accountIdProcess.stdout?.on('data', (data) => {
+            accountIdOutput += data.toString();
+          });
+          await new Promise((resolve) => {
+            accountIdProcess.on('close', () => resolve(0));
+          });
+
+          canisterAccountId = accountIdOutput.trim();
+        }
+
+        const icpProcess = spawn('dfx', ['ledger', '--network', network, 'balance', canisterAccountId], { stdio: 'pipe' });
         let icpOutput = '';
         icpProcess.stdout?.on('data', (data) => {
           icpOutput += data.toString();
@@ -221,10 +266,11 @@ class ICPHubCLI {
         });
 
         // Parse and format outputs
-        const icpBalance = icpOutput.match(/\((\d+(?:_\d+)*)\s*:\s*nat\)/)?.[1]?.replace(/_/g, '') || '0';
-        const cyclesBalance = cyclesOutput.match(/\((\d+(?:_\d+)*)\s*:\s*nat\)/)?.[1]?.replace(/_/g, '') || '0';
+        // dfx ledger balance returns format like "0.10000000 ICP"
+        const icpBalanceMatch = icpOutput.match(/(\d+(?:\.\d+)?)\s*ICP/);
+        const icpFormatted = icpBalanceMatch ? parseFloat(icpBalanceMatch[1]).toFixed(8) : '0.00000000';
 
-        const icpFormatted = (parseInt(icpBalance) / 100_000_000).toFixed(8);
+        const cyclesBalance = cyclesOutput.match(/\((\d+(?:_\d+)*)\s*:\s*nat\)/)?.[1]?.replace(/_/g, '') || '0';
         const cyclesFormatted = (parseInt(cyclesBalance) / 1_000_000_000_000).toFixed(2);
 
         console.log(`\x1b[34mTreasury:\x1b[0m ${icpFormatted} ICP`);
@@ -232,6 +278,15 @@ class ICPHubCLI {
       } catch (error) {
         console.log(`\x1b[34mTreasury:\x1b[0m Unable to fetch`);
         console.log(`\x1b[34mCycles:\x1b[0m Unable to fetch`);
+      }
+
+      // Get ICP tokens balance using the canister's queryLedgerBalance function
+      try {
+        const icpBalance = await actor.queryLedgerBalance();
+        const icpFormatted = (Number(icpBalance) / 100000000).toFixed(8);
+        console.log(`\x1b[34mICP Tokens:\x1b[0m ${icpFormatted} ICP`);
+      } catch (error) {
+        console.log(`\x1b[34mICP Tokens:\x1b[0m Unable to fetch`);
       }
 
       console.log("");
@@ -1088,7 +1143,6 @@ class ICPHubCLI {
       // First, switch to mainnet-secure identity
       const { spawn } = await import('child_process');
 
-      console.log("🔑 Switching to mainnet-secure identity...");
       const switchProcess = spawn('dfx', ['identity', 'use', 'mainnet-secure'], { stdio: 'pipe' });
 
       let switchOutput = '';
@@ -1121,9 +1175,19 @@ class ICPHubCLI {
         });
       });
 
-      const mainnetSecurePrincipal = principalOutput.trim();
-      console.log(`✅ Switched to mainnet-secure identity`);
-      console.log(`🆔 Principal: ${mainnetSecurePrincipal}`);
+      // Prompt for ICP Ledger canister ID
+      const icpLedgerCanisterId = await promptUser('Enter ICP Ledger canister ID: ');
+
+      if (!icpLedgerCanisterId) {
+        throw new Error('ICP Ledger canister ID is required');
+      }
+
+      // Validate principal format (basic check)
+      try {
+        Principal.fromText(icpLedgerCanisterId);
+      } catch (error) {
+        throw new Error(`Invalid principal format: ${icpLedgerCanisterId}`);
+      }
 
       // Initialize access control to make this identity the first admin
       const network = this.currentEnv === 'production' ? 'ic' : 'local';
@@ -1135,7 +1199,8 @@ class ICPHubCLI {
         network,
         'call',
         'context_registry',
-        'initializeAccessControl'
+        'initializeAccessControl',
+        `(principal "${icpLedgerCanisterId}")`
       ];
 
       const initProcess = spawn('dfx', initArgs, { stdio: 'pipe' });
@@ -1152,7 +1217,6 @@ class ICPHubCLI {
         initProcess.on('close', (code) => {
           if (code === 0) {
             console.log(`✅ Access control initialized successfully`);
-            console.log(`👑 ${mainnetSecurePrincipal} is now the primary admin`);
             resolve(code);
           } else {
             if (initOutput.includes('already initialized') || initOutput.includes('Access control')) {
@@ -1167,35 +1231,6 @@ class ICPHubCLI {
           }
         });
       });
-
-      // Verify admin status
-      try {
-        await this.init(); // Re-initialize manager with current identity
-        const actor = this.manager.getActor();
-        if (actor) {
-          const allAdmins = await actor.getAllAdmins();
-          const isAdmin = allAdmins.some(admin => admin.toString() === mainnetSecurePrincipal);
-
-          console.log(`\n📊 Final Status:`);
-          console.log(`   Identity: mainnet-secure`);
-          console.log(`   Principal: ${mainnetSecurePrincipal}`);
-          console.log(`   Admin Status: ${isAdmin ? '✅ ADMIN' : '❌ NOT ADMIN'}`);
-          console.log(`   Total Admins: ${allAdmins.length}`);
-
-          if (isAdmin) {
-            console.log(`\n🎉 Successfully initialized! You can now manage the canister with admin privileges.`);
-            console.log(`💡 Use 'icphub admins' to see all admins`);
-            console.log(`💡 Use 'icphub status' to check canister status`);
-          } else if (allAdmins.length > 0) {
-            console.log(`\n⚠️  Access control was already initialized by another identity.`);
-            console.log(`   Current admin(s):`);
-            allAdmins.forEach(admin => console.log(`     ${admin.toString()}`));
-          }
-        }
-      } catch (error) {
-        console.log(`\n⚠️  Could not verify admin status: ${error}`);
-        console.log(`   Use 'icphub admins' to check current admin status`);
-      }
 
     } catch (error) {
       console.log(`❌ Error during admin initialization:`, (error as Error).message || error);
@@ -1677,6 +1712,27 @@ class ICPHubCLI {
 
       console.log(`✅ Fresh deployment completed successfully`);
       console.log("");
+
+      // Prompt for ICP Ledger canister ID
+      console.log(`💰 ICP Ledger Configuration`);
+      console.log(`The canister needs to know the ICP Ledger canister ID to handle ICP transactions.`);
+      console.log(`For mainnet, use: rrkah-fqaaa-aaaaa-aaaaq-cai`);
+      console.log(`For local development, use the same: rrkah-fqaaa-aaaaa-aaaaq-cai`);
+      console.log(``);
+
+      const icpLedgerCanisterId = await promptUser('Enter ICP Ledger canister ID: ');
+
+      if (!icpLedgerCanisterId) {
+        throw new Error('ICP Ledger canister ID is required');
+      }
+
+      // Validate principal format (basic check)
+      try {
+        Principal.fromText(icpLedgerCanisterId);
+      } catch (error) {
+        throw new Error(`Invalid principal format: ${icpLedgerCanisterId}`);
+      }
+
       console.log("🔧 Initializing access control...");
 
       // Now initialize the current wallet as admin
@@ -1687,7 +1743,8 @@ class ICPHubCLI {
         network,
         'call',
         'context_registry',
-        'initializeAccessControl'
+        'initializeAccessControl',
+        `(principal "${icpLedgerCanisterId}")`
       ];
 
       const initProcess = spawn('dfx', dfxArgs, { stdio: 'inherit' });
@@ -1696,6 +1753,7 @@ class ICPHubCLI {
         initProcess.on('close', (code) => {
           if (code === 0) {
             console.log(`✅ Access control initialized - You are now admin`);
+            console.log(`💰 ICP Ledger configured: ${icpLedgerCanisterId}`);
             resolve(code);
           } else {
             console.log(`⚠️  Could not initialize access control (may already be initialized)`);
@@ -1719,14 +1777,282 @@ class ICPHubCLI {
     }
   }
 
+  async buildCanister() {
+    await this.printStandardHeader("build");
+
+    console.log("🔨 Building canister...");
+    console.log("");
+
+    try {
+      const { spawn } = await import('child_process');
+
+      // Build the canister using dfx build
+      const buildProcess = spawn('dfx', ['build'], {
+        stdio: ['inherit', 'pipe', 'pipe'],
+        cwd: process.cwd()
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      buildProcess.stdout?.on('data', (data) => {
+        const output = data.toString();
+        stdout += output;
+        process.stdout.write(output);
+      });
+
+      buildProcess.stderr?.on('data', (data) => {
+        const output = data.toString();
+        stderr += output;
+        // Show warnings and errors in real-time
+        if (output.trim()) {
+          process.stderr.write(output);
+        }
+      });
+
+      const exitCode = await new Promise<number>((resolve) => {
+        buildProcess.on('close', (code) => {
+          resolve(code || 0);
+        });
+      });
+
+      console.log("");
+
+      if (exitCode === 0) {
+        console.log("✅ Build completed successfully!");
+
+        // Check for any warnings in the output
+        const hasWarnings = stderr.includes('warning') || stderr.includes('Warning');
+        if (hasWarnings) {
+          console.log("⚠️  Build completed with warnings (see output above)");
+        }
+
+        console.log("");
+        console.log("📦 Canister compiled and ready for deployment");
+        console.log("");
+        console.log("Next steps:");
+        console.log("   • Deploy: icphub deploy fresh");
+        console.log("   • Or upgrade: dfx deploy --mode upgrade");
+      } else {
+        console.error("❌ Build failed!");
+        console.error("");
+        console.error("Common issues:");
+        console.error("   • Check Motoko syntax in src/context-registry/");
+        console.error("   • Verify all imports are correct");
+        console.error("   • Ensure dfx.json configuration is valid");
+        console.error("");
+        console.error("For detailed error information, see the output above.");
+        process.exit(1);
+      }
+
+    } catch (error: any) {
+      console.error("❌ Error during build:", error.message || error);
+      process.exit(1);
+    }
+  }
+
+  async adminAddName() {
+    await this.printStandardHeader("admin add-name");
+
+    const actor = this.manager.getActor();
+    if (!actor) throw new Error("Actor not initialized");
+
+    try {
+      // Check admin status first
+      const { spawn } = await import('child_process');
+      const principalProcess = spawn('dfx', ['identity', 'get-principal'], { stdio: 'pipe' });
+      let dfxPrincipal = '';
+
+      principalProcess.stdout?.on('data', (data) => {
+        dfxPrincipal += data.toString();
+      });
+
+      await new Promise((resolve, reject) => {
+        principalProcess.on('close', (code) => {
+          if (code === 0) resolve(code);
+          else reject(new Error(`Failed to get DFX principal`));
+        });
+      });
+
+      dfxPrincipal = dfxPrincipal.trim();
+
+      const allAdmins = await actor.getAllAdmins();
+      const isAdmin = allAdmins.some(admin => admin.toString() === dfxPrincipal);
+
+      if (!isAdmin) {
+        console.log("❌ Error: Only admins can add names without payment");
+        return;
+      }
+
+      // Check for active season
+      const seasons = await actor.listSeasons();
+      const activeSeasons = seasons.filter(s => 'active' in s.status);
+
+      if (activeSeasons.length === 0) {
+        console.log("❌ Error: No active season found. Please activate a season first.");
+        console.log("   Use: icphub seasons activate <id>");
+        return;
+      }
+
+      const activeSeason = activeSeasons[0];
+      console.log(`✅ Active season found: ${activeSeason.name} (ID: ${activeSeason.id})`);
+      console.log("");
+
+      // Interactive prompts for all parameters
+      const readline = await import('readline');
+
+      // Name
+      const rl1 = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      const name = await new Promise<string>((resolve) => {
+        rl1.question('Name to register: ', (answer) => {
+          rl1.close();
+          resolve(answer.trim());
+        });
+      });
+
+      if (!name) {
+        console.log("❌ Error: Name is required");
+        return;
+      }
+
+      // Address/ID
+      const rl2 = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      const address = await new Promise<string>((resolve) => {
+        rl2.question('Address/ID (principal, canister ID, or hub ID): ', (answer) => {
+          rl2.close();
+          resolve(answer.trim());
+        });
+      });
+
+      if (!address) {
+        console.log("❌ Error: Address/ID is required");
+        return;
+      }
+
+      // Type selection
+      const rl3 = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      console.log("\nSelect type:");
+      console.log("1. Identity (principal)");
+      console.log("2. Canister");
+      console.log("3. Hub");
+
+      const typeChoice = await new Promise<string>((resolve) => {
+        rl3.question('Type (1-3): ', (answer) => {
+          rl3.close();
+          resolve(answer.trim());
+        });
+      });
+
+      let addressType: string;
+      switch (typeChoice) {
+        case '1':
+          addressType = 'identity';
+          break;
+        case '2':
+          addressType = 'canister';
+          break;
+        case '3':
+          addressType = 'hub';
+          break;
+        default:
+          console.log("❌ Error: Invalid type selection. Please choose 1-3");
+          return;
+      }
+
+      // Show summary and ask for confirmation
+      console.log("");
+      console.log("Name registration summary:");
+      console.log(`   Name: ${name}`);
+      console.log(`   Address/ID: ${address}`);
+      console.log(`   Type: ${addressType}`);
+      console.log(`   Season: ${activeSeason.name} (ID: ${activeSeason.id})`);
+      console.log(`   Length: ${name.length} characters (no restrictions for admin)`);
+      console.log(`   Payment: FREE (admin add)`);
+      console.log("");
+
+      const envName = this.currentEnv === 'production' ? 'production' : 'local';
+      console.log(`We are going to register this name without payment.`);
+      console.log(`\x1b[1m\x1b[33mTo continue write "${envName}"\x1b[0m`);
+
+      const rl4 = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      const confirmation = await new Promise<string>((resolve) => {
+        rl4.question('', (answer) => {
+          rl4.close();
+          resolve(answer.trim().toLowerCase());
+        });
+      });
+
+      if (confirmation !== envName) {
+        console.log("Operation cancelled.");
+        return;
+      }
+
+      // Execute dfx command directly
+      const network = this.currentEnv === 'production' ? 'ic' : 'local';
+      const dfxArgs = [
+        'canister',
+        '--network',
+        network,
+        'call',
+        'context_registry',
+        'adminAddName',
+        `("${name}", "${address}", variant { ${addressType} })`
+      ];
+
+      const dfxProcess = spawn('dfx', dfxArgs, { stdio: 'pipe' });
+
+      let output = '';
+      dfxProcess.stdout?.on('data', (data) => {
+        output += data.toString();
+      });
+      dfxProcess.stderr?.on('data', (data) => {
+        output += data.toString();
+      });
+
+      await new Promise((resolve, reject) => {
+        dfxProcess.on('close', (code) => {
+          if (code === 0) {
+            console.log(`✅ Name "${name}" successfully registered!`);
+            console.log(`   Type: ${addressType}`);
+            console.log(`   Address: ${address}`);
+            console.log(`   Season: ${activeSeason.name}`);
+            console.log(`   Owner: ${dfxPrincipal} (admin)`);
+            resolve(code);
+          } else {
+            console.log(`❌ Failed to register name`);
+            console.log(`   Error: ${output}`);
+            reject(new Error(`dfx command failed with code ${code}`));
+          }
+        });
+      });
+
+    } catch (error) {
+      console.log("❌ Error adding name:", (error as Error).message || error);
+    }
+  }
+
   async withdrawIcp() {
     await this.printStandardHeader("withdraw");
 
     // Restrict withdraw to production environment only
     if (this.currentEnv !== 'production') {
       console.log("❌ Error: Withdraw is only available in production environment");
-      console.log("   Switch to production: icphub env production");
-      console.log("   Reason: Local development uses test tokens with no real value");
       return;
     }
 
@@ -1760,9 +2086,41 @@ class ICPHubCLI {
         return;
       }
 
-      // Get current balance using dfx (since getIcpBalance requires admin access)
+      // Get current balance directly from ledger using canister's account ID
       const network = this.currentEnv === 'production' ? 'ic' : 'local';
-      const icpProcess = spawn('dfx', ['canister', '--network', network, 'call', 'context_registry', 'getIcpBalance', '--query'], { stdio: 'pipe' });
+
+      // Get canister account ID
+      let canisterAccountId: string;
+      if (network === 'ic') {
+        canisterAccountId = '9874f67fa5e6dad2015090fe78a84a17497587359e6c0c181adb96400ba76830';  // Production account ID
+      } else {
+        // For local, get the canister principal and derive account ID
+        const principalProcess = spawn('dfx', ['canister', 'id', 'context_registry'], { stdio: 'pipe' });
+        let principalOutput = '';
+        principalProcess.stdout?.on('data', (data) => {
+          principalOutput += data.toString();
+        });
+        await new Promise((resolve) => {
+          principalProcess.on('close', () => resolve(0));
+        });
+
+        const canisterPrincipal = principalOutput.trim();
+
+        // Get account ID from principal
+        const accountIdProcess = spawn('dfx', ['ledger', 'account-id', '--of-principal', canisterPrincipal], { stdio: 'pipe' });
+        let accountIdOutput = '';
+        accountIdProcess.stdout?.on('data', (data) => {
+          accountIdOutput += data.toString();
+        });
+        await new Promise((resolve) => {
+          accountIdProcess.on('close', () => resolve(0));
+        });
+
+        canisterAccountId = accountIdOutput.trim();
+      }
+
+      // Query ledger balance
+      const icpProcess = spawn('dfx', ['ledger', '--network', network, 'balance', canisterAccountId], { stdio: 'pipe' });
       let icpOutput = '';
       icpProcess.stdout?.on('data', (data) => {
         icpOutput += data.toString();
@@ -1772,9 +2130,9 @@ class ICPHubCLI {
         icpProcess.on('close', () => resolve(0));
       });
 
-      // Parse the balance from dfx output
-      const icpBalance = icpOutput.match(/\((\d+(?:_\d+)*)\s*:\s*nat\)/)?.[1]?.replace(/_/g, '') || '0';
-      const currentBalanceIcp = parseInt(icpBalance) / 100_000_000;
+      // Parse the balance from dfx ledger output (format: "0.10000000 ICP")
+      const icpBalanceMatch = icpOutput.match(/(\d+(?:\.\d+)?)\s*ICP/);
+      const currentBalanceIcp = icpBalanceMatch ? parseFloat(icpBalanceMatch[1]) : 0;
 
       if (currentBalanceIcp === 0) {
         console.log("❌ Error: No ICP balance available for withdrawal");
@@ -1911,6 +2269,47 @@ class ICPHubCLI {
     }
   }
 
+  async showPaymentInfo() {
+    await this.printStandardHeader("payment-info");
+
+    const actor = this.manager.getActor();
+    if (!actor) throw new Error("Actor not initialized");
+
+    try {
+      const addresses = await actor.getCanisterAddresses();
+
+      console.log(`💰 Canister Payment Information`);
+      console.log(`===============================`);
+      console.log(``);
+      console.log(`🆔 Principal ID: ${addresses.principalId.toString()}`);
+      console.log(`📍 Account ID:   ${addresses.accountId}`);
+      console.log(``);
+      console.log(`📝 Usage:`);
+      console.log(`   • Send ICP to the Account ID above`);
+      console.log(`   • Use Principal ID for registration verification`);
+      console.log(`   • Both addresses represent the same canister`);
+      console.log(``);
+
+      // Show current balance
+      try {
+        const balance = await actor.getIcpBalance();
+        const balanceIcp = Number(balance) / 100_000_000;
+        console.log(`💰 Current Balance: ${balanceIcp.toFixed(8)} ICP`);
+      } catch (error) {
+        console.log(`💰 Current Balance: Unable to fetch (admin only)`);
+      }
+
+      console.log(``);
+      console.log(`🔍 Payment Verification:`);
+      console.log(`   1. Send ICP to Account ID: ${addresses.accountId}`);
+      console.log(`   2. Note the block index from transaction`);
+      console.log(`   3. Call verifyAndRegisterName with block index`);
+
+    } catch (error) {
+      console.error("❌ Error fetching payment info:", error);
+    }
+  }
+
   async showHelp() {
     await this.printStandardHeader("help");
     console.log(`🔧 Available CLIs:`);
@@ -1922,7 +2321,8 @@ class ICPHubCLI {
     console.log(`  icphub env production            Switch to production environment (IC)`);
     console.log(`  icphub env status               Show current environment`);
     console.log(``);
-    console.log(`🚀 Deployment:`);
+    console.log(`🚀 Build & Deployment:`);
+    console.log(`  icphub build                     Build canister and check for errors`);
     console.log(`  icphub deploy fresh              Deploy fresh canister (DELETES ALL DATA)`);
     console.log(``);
     console.log(`📊 Status & Info:`);
@@ -1951,6 +2351,10 @@ class ICPHubCLI {
     console.log(`  icphub name <name> markdown      Show name markdown content`);
     console.log(`  icphub name <name> did           Show name DID file`);
     console.log(`  icphub name add <name> <userId>  Add name to user (shows dfx command)`);
+    console.log(`  icphub admin add-name            Add name without payment (admin only)`);
+    console.log(``);
+    console.log(`💰 Payment Info:`);
+    console.log(`  icphub payment-info              Show canister payment addresses`);
     console.log(``);
     console.log(`📝 Examples:`);
     console.log(`  icphub deploy fresh`);
@@ -2050,12 +2454,20 @@ async function main() {
         }
         break;
 
+      case "build":
+        await cli.buildCanister();
+        break;
+
       case "wallet":
         await cli.showWallet();
         break;
 
       case "withdraw":
         await cli.withdrawIcp();
+        break;
+
+      case "payment-info":
+        await cli.showPaymentInfo();
         break;
 
       case "seasons":
@@ -2113,6 +2525,16 @@ async function main() {
         }
         break;
 
+      case "admin":
+        if (subcommand === "add-name") {
+          await cli.adminAddName();
+        } else {
+          console.error(`❌ Unknown admin subcommand: ${subcommand}`);
+          console.error('   Available commands: add-name');
+          await cli.showHelp();
+        }
+        break;
+
       case "name":
         if (!subcommand) {
           console.error('❌ Usage: icphub name <name> [command]');
@@ -2152,8 +2574,10 @@ async function main() {
         try {
           const { spawn } = await import('child_process');
 
-          // Get ICP balance
-          const icpProcess = spawn('dfx', ['canister', 'call', 'context_registry', 'getIcpBalance', '--query'], { stdio: 'pipe' });
+          // Get ICP balance directly from ledger
+          // Use production account ID for this balance check
+          const canisterAccountId = '9874f67fa5e6dad2015090fe78a84a17497587359e6c0c181adb96400ba76830';
+          const icpProcess = spawn('dfx', ['ledger', 'balance', canisterAccountId], { stdio: 'pipe' });
           let icpOutput = '';
           icpProcess.stdout?.on('data', (data) => {
             icpOutput += data.toString();
@@ -2175,10 +2599,12 @@ async function main() {
           });
 
           // Parse and format outputs
-          const icpBalance = icpOutput.match(/\((\d+(?:_\d+)*)\s*:\s*nat\)/)?.[1]?.replace(/_/g, '') || '0';
-          const cyclesBalance = cyclesOutput.match(/\((\d+(?:_\d+)*)\s*:\s*nat\)/)?.[1]?.replace(/_/g, '') || '0';
+          // dfx ledger balance returns format like "0.10000000 ICP"
+          const icpBalanceMatch = icpOutput.match(/(\d+(?:\.\d+)?)\s*ICP/);
+          const icpFormatted = icpBalanceMatch ? parseFloat(icpBalanceMatch[1]).toFixed(8) : '0.00000000';
+          const icpBalance = icpBalanceMatch ? (parseFloat(icpBalanceMatch[1]) * 100_000_000).toString() : '0';
 
-          const icpFormatted = (parseInt(icpBalance) / 100_000_000).toFixed(8);
+          const cyclesBalance = cyclesOutput.match(/\((\d+(?:_\d+)*)\s*:\s*nat\)/)?.[1]?.replace(/_/g, '') || '0';
           const cyclesFormatted = (parseInt(cyclesBalance) / 1_000_000_000_000).toFixed(2);
 
           console.log(`💰 ICP Balance: ${icpFormatted} ICP (${icpBalance} e8s)`);

@@ -1,4 +1,9 @@
 export const idlFactory = ({ IDL }) => {
+  const AddressType = IDL.Variant({
+    'hub' : IDL.Null,
+    'canister' : IDL.Null,
+    'identity' : IDL.Null,
+  });
   const UserRole = IDL.Variant({
     'admin' : IDL.Null,
     'user' : IDL.Null,
@@ -70,10 +75,6 @@ export const idlFactory = ({ IDL }) => {
     'checksum' : IDL.Opt(IDL.Text),
     'success' : IDL.Bool,
   });
-  const AddressType = IDL.Variant({
-    'canister' : IDL.Null,
-    'identity' : IDL.Null,
-  });
   const NameRecord = IDL.Record({
     'owner' : IDL.Text,
     'name' : IDL.Text,
@@ -105,6 +106,7 @@ export const idlFactory = ({ IDL }) => {
   const TransferResult = IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text });
   return IDL.Service({
     'activateSeason' : IDL.Func([IDL.Nat], [], []),
+    'adminAddName' : IDL.Func([IDL.Text, IDL.Text, AddressType], [], []),
     'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
     'cancelSeason' : IDL.Func([IDL.Nat], [], []),
     'checkBlockIndexUsed' : IDL.Func([IDL.Nat], [IDL.Bool], ['query']),
@@ -138,13 +140,17 @@ export const idlFactory = ({ IDL }) => {
     'getAllPayments' : IDL.Func([], [IDL.Vec(Payment)], ['query']),
     'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
     'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
+    'getCanisterAddresses' : IDL.Func(
+        [],
+        [IDL.Record({ 'accountId' : IDL.Text, 'principalId' : IDL.Principal })],
+        ['query'],
+      ),
     'getCanisterIcpAddress' : IDL.Func([], [IDL.Text], ['query']),
-    'getCanisterPrincipal' : IDL.Func([], [IDL.Principal], ['query']),
+    'getCanisterPrincipalId' : IDL.Func([], [IDL.Principal], ['query']),
     'getCanisterVersion' : IDL.Func([], [Version], ['query']),
     'getCurrentTime' : IDL.Func([], [IDL.Int], ['query']),
     'getCyclesBalance' : IDL.Func([], [IDL.Nat], ['query']),
     'getFileReference' : IDL.Func([IDL.Text], [FileReference], ['query']),
-    'getIcpBalance' : IDL.Func([], [IDL.Nat], ['query']),
     'getMarkdown' : IDL.Func([IDL.Text], [MarkdownContent], ['query']),
     'getMarkdownContent' : IDL.Func(
         [IDL.Text],
@@ -178,7 +184,6 @@ export const idlFactory = ({ IDL }) => {
             'premiumSubscriptions' : IDL.Nat,
             'enterpriseSubscriptions' : IDL.Nat,
             'totalSubscriptions' : IDL.Nat,
-            'totalRevenue' : IDL.Nat,
             'basicSubscriptions' : IDL.Nat,
             'activeSubscriptions' : IDL.Nat,
           }),
@@ -209,7 +214,7 @@ export const idlFactory = ({ IDL }) => {
       ),
     'hasActiveSubscription' : IDL.Func([IDL.Principal], [IDL.Bool], ['query']),
     'hasRegisteredName' : IDL.Func([IDL.Text], [IDL.Bool], ['query']),
-    'initializeAccessControl' : IDL.Func([], [], []),
+    'initializeAccessControl' : IDL.Func([IDL.Principal], [], []),
     'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
     'listFileReferences' : IDL.Func([], [IDL.Vec(FileReference)], ['query']),
     'listNameRecords' : IDL.Func([], [IDL.Vec(NameRecord)], ['query']),
@@ -226,6 +231,7 @@ export const idlFactory = ({ IDL }) => {
         ],
         [],
       ),
+    'queryLedgerBalance' : IDL.Func([], [IDL.Nat], []),
     'registerFileReference' : IDL.Func([IDL.Text, IDL.Text], [], []),
     'registerName' : IDL.Func(
         [IDL.Text, IDL.Text, AddressType, IDL.Text, IDL.Nat],

@@ -7,6 +7,8 @@ import { usePlugWallet } from '../hooks/usePlugWallet';
 import { useGetCanisterPrincipal, useGetActiveSeasonInfo, useListNameRecords, useGetCanisterVersion, useListFileReferences } from '../hooks/useQueries';
 import { loadConfig } from '../config';
 import { useEffect, useState as useLocalState } from 'react';
+import { AccountIdentifier } from '@dfinity/ledger-icp';
+import { Principal } from '@dfinity/principal';
 
 interface SystemInfoPopupProps {
   isOpen: boolean;
@@ -21,15 +23,29 @@ export function SystemInfoPopup({ isOpen, onClose }: SystemInfoPopupProps) {
   const { data: canisterVersion } = useGetCanisterVersion();
   const { data: fileReferences = [] } = useListFileReferences();
   const [canisterId, setCanisterId] = useLocalState<string>('Loading...');
+  const [accountId, setAccountId] = useLocalState<string>('Loading...');
 
-  // Load canister ID from config
+  // Load canister ID from config and calculate Account ID
   useEffect(() => {
     const getCanisterId = async () => {
       try {
         const config = await loadConfig();
         setCanisterId(config.backend_canister_id);
+
+        // Calculate Account ID from the canister principal
+        try {
+          const principal = Principal.fromText(config.backend_canister_id);
+          const accountIdentifier = AccountIdentifier.fromPrincipal({
+            principal: principal,
+            subAccount: undefined // Use default subaccount
+          });
+          setAccountId(accountIdentifier.toHex());
+        } catch {
+          setAccountId('Error calculating');
+        }
       } catch {
         setCanisterId('Error loading');
+        setAccountId('Error loading');
       }
     };
     getCanisterId();
@@ -115,6 +131,28 @@ export function SystemInfoPopup({ isOpen, onClose }: SystemInfoPopupProps) {
             </div>
           </div>
 
+          {/* Account ID (for payments) */}
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-muted-foreground">Payment Account ID</label>
+            <div className="flex items-start justify-between gap-2">
+              <span className="text-xs font-mono text-foreground break-all leading-relaxed flex-1">
+                {accountId}
+              </span>
+              {accountId !== 'Loading...' && accountId !== 'Error loading' && accountId !== 'Error calculating' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => copyToClipboard(accountId, 'Account ID')}
+                  className="h-6 w-6 p-0 flex-shrink-0"
+                >
+                  <Copy className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              ICP payments should be sent to this account
+            </p>
+          </div>
 
           {/* Current Season */}
           <div className="space-y-1">
